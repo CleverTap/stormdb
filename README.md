@@ -50,6 +50,10 @@ A few pointers
 
 // TODO: More to come here.
 
+## Maintainers
+StormDB is maintained by the CleverTap Labs team, with contributions
+from the entire engineering team.
+
 ## License
 StormDB is licensed under the MIT License. Please see LICENSE under the root directory.
  
