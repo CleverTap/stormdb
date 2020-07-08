@@ -23,6 +23,14 @@
         </dependency>
     </dependencies>
 
+    <repositories>
+        <repository>
+            <id>TU-Darmstadt Repository</id>
+            <name>TU-Darmstadt Repository</name>
+            <url>http://zoidberg.ukp.informatik.tu-darmstadt.de/artifactory/public-releases/</url>
+        </repository>
+    </repositories>
+
     <build>
         <plugins>
             <plugin>
