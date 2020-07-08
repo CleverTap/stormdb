@@ -31,7 +31,7 @@ in the database. When we benchmarked sequential reads of popular key value store
     - As a result, once created, all values are always of the specified size
     - This is fixed, as StormDB is an offset based database
 
-## FAQ    
+## FAQs    
 ### When should I consider using StormDB?
 - Your keys are limited to 4 bytes (a maximum of ~4.2 billion keys per database)
 - The size of your values are fixed
