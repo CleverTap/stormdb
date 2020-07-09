@@ -6,7 +6,6 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -31,6 +30,7 @@ public class StormDB {
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
     private static final String FILE_TYPE_NEXT = ".next";
+    private static final String FILE_TYPE_DELETE = ".del";
 
     protected static final int FOUR_MB = 4 * 1024 * 1024;
 
@@ -73,13 +73,14 @@ public class StormDB {
 
     private File dataFile;
     private File walFile;
-    private File nextwalFile;
+    private File nextWalFile;
     private File nextDataFile;
 
     private DataOutputStream walOut;
 
     private Thread tCompaction;
     private final Object compactionSync = new Object();
+    private final Object compactionLock = new Object();
     private boolean shutDown = false;
 
     public StormDB(final int valueSize, final String dbDir) throws IOException {
@@ -116,11 +117,9 @@ public class StormDB {
                     FILE_TYPE_NEXT).exists()) {
                 // Recover implicitly builds index.
                 recover();
-            } else {
-                // Since we have compacted we have only data file to read.
-                buildIndex(false);
-                buildIndex(true);
             }
+            buildIndex(false);
+            buildIndex(true);
         } else {
             // New database. Write value size to the meta.
             final ByteBuffer out = ByteBuffer.allocate(4);
@@ -140,8 +139,9 @@ public class StormDB {
             while (!shutDown) {
                 try {
                     compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
-                    // TODO: 08/07/20 Check if there is a need for compaction.
-                    compact();
+                    if(shouldCompact()) {
+                        compact();
+                    }
                 } catch (InterruptedException | IOException e) {
                     e.printStackTrace();
                 }
@@ -150,101 +150,152 @@ public class StormDB {
         tCompaction.start();
     }
 
+    private boolean shouldCompact() {
+        // TODO: 09/07/20 Decide and add criteria for compaction here.
+        return true;
+    }
+
     private void recover() throws IOException {
         // This scenario can happen only at start.
-        // Simply append wal.next to wal file and compact
-        // TODO: 09/07/20 Append wal.next to wal
+
+        // 1. Simply append wal.next to wal file and compact
+        File nextWalFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_DATA +
+                FILE_TYPE_NEXT);
+        File currentWalFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_DATA);
+
+        FileInputStream inStream = new FileInputStream(nextWalFile);
+        FileOutputStream outStream = new FileOutputStream(currentWalFile, true);
+
+        byte[] buffer = new byte[FOUR_MB];
+        int length;
+        while ((length = inStream.read(buffer)) > 0){
+            outStream.write(buffer, 0, length);
+        }
+
+        inStream.close();
+        outStream.close();
+
+        // 2. For cleanliness sake, delete .next files.
+        if(!nextWalFile.delete()) {
+            // TODO: 09/07/20 log error
+        }
+        File nextDataFile = new File(dbDirFile.getAbsolutePath() + "/" +
+                FILE_NAME_DATA + FILE_TYPE_NEXT);
+        if(nextDataFile.exists()) {
+            if(!nextDataFile.delete()) {
+                // TODO: 09/07/20 log error
+            }
+        }
+
+        // 3. Now finally call the compact procedure
         compact();
     }
 
     private void compact() throws IOException {
-        File prevDataFile = dataFile;
-        // 1. Move wal to wal.prev and create new wal file.
-        try {
-            rwLock.writeLock().lock();
+        synchronized (compactionLock) {
+            File prevDataFile = dataFile;
+            // 1. Move wal to wal.prev and create new wal file.
+            try {
+                rwLock.writeLock().lock();
 
-            // First flush all data.
-            flush();
+                // Check whether there was any data coming in. If not simply bail out.
+                if(writeOffsetWal == 0) {
+                    return;
+                }
 
-            // Now create wal bitset for next file
-            dataInNextFile = new BitSet();
-            dataInNextWalFile = new BitSet();
+                // First flush all data.
+                // This is because we will be resetting writeOffsetWal below and we need to get all
+                // buffer to file so that their offsets are honoured.
+                flush();
 
-            nextwalFile = new File(dbDirFile.getAbsolutePath() + "/" +
-                    FILE_NAME_WAL + FILE_TYPE_NEXT);
+                // Now create wal bitset for next file
+                dataInNextFile = new BitSet();
+                dataInNextWalFile = new BitSet();
 
-            // Create new walOut File
-            walOut = new DataOutputStream(new FileOutputStream(nextwalFile));
-            writeOffsetWal = 0;
+                nextWalFile = new File(dbDirFile.getAbsolutePath() + "/" +
+                        FILE_NAME_WAL + FILE_TYPE_NEXT);
 
-            // TODO: 08/07/20 Remember to invalidate/refresh file handles in thread local
+                // Create new walOut File
+                walOut = new DataOutputStream(new FileOutputStream(nextWalFile));
+                writeOffsetWal = 0;
 
-        } finally {
-            rwLock.writeLock().unlock();
-        }
+                // TODO: 08/07/20 Remember to invalidate/refresh file handles in thread local
 
-        // 2. Process wal.current file and out to data.next file.
-        // 3. Process data.current file.
-        nextDataFile = new File(dbDirFile.getAbsolutePath() + "/" +
-                FILE_NAME_DATA + FILE_TYPE_NEXT);
-        DataOutputStream nextDataOut = new DataOutputStream(
-                new FileOutputStream(nextDataFile));
-        ByteBuffer nextWriteBuffer = ByteBuffer.allocate((FOUR_MB / recordSize) * recordSize);
-        final int[] nextFileOffset = {0};
-        iterate(false, false, (key, data, offset) -> {
-            nextWriteBuffer.putInt(key);
-            nextWriteBuffer.put(data, offset, valueSize);
-
-            // Optimize batched writes and updates to structures for lesser contention
-            if (nextWriteBuffer.remaining() == 0) {
-                flushNext(nextDataOut, nextWriteBuffer, nextFileOffset);
+            } finally {
+                rwLock.writeLock().unlock();
             }
-        });
-        if (nextWriteBuffer.position() != 0) {
-            flushNext(nextDataOut, nextWriteBuffer, nextFileOffset);
-        }
 
-        File prevWalFile = walFile;
-        try {
-            rwLock.writeLock().lock();
+            // 2. Process wal.current file and out to data.next file.
+            // 3. Process data.current file.
+            nextDataFile = new File(dbDirFile.getAbsolutePath() + "/" +
+                    FILE_NAME_DATA + FILE_TYPE_NEXT);
+            DataOutputStream nextDataOut = new DataOutputStream(
+                    new FileOutputStream(nextDataFile));
+            ByteBuffer nextWriteBuffer = ByteBuffer.allocate((FOUR_MB / recordSize) * recordSize);
+            final int[] nextFileOffset = {0};
+            iterate(false, false, (key, data, offset) -> {
+                nextWriteBuffer.putInt(key);
+                nextWriteBuffer.put(data, offset, valueSize);
 
-            // Make bitsets point right.
-            dataInWalFile = dataInNextWalFile;
-            dataInNextFile = null;
-            dataInNextWalFile = null;
+                // Optimize batched writes and updates to structures for lesser contention
+                if (nextWriteBuffer.remaining() == 0) {
+                    nextFileOffset[0] = flushNext(nextDataOut, nextWriteBuffer, nextFileOffset[0]);
+                }
+            });
+            if (nextWriteBuffer.position() != 0) {
+                nextFileOffset[0] = flushNext(nextDataOut, nextWriteBuffer, nextFileOffset[0]);
+            }
 
-            walFile = nextwalFile;
-            // Rename *.next to *.current
-            walFile.renameTo(new File(dbDirFile.getAbsolutePath() + "/" +
-                    FILE_NAME_WAL));
+            File prevWalFile = walFile;
+            try {
+                rwLock.writeLock().lock();
 
-            nextDataFile.renameTo(new File(dbDirFile.getAbsolutePath() + "/" +
-                    FILE_NAME_DATA));
-            dataFile = nextDataFile;
-            nextDataFile = null;
+                // First rename prevWalFile and prevDataFile so that .next can be renamed
+                prevWalFile.renameTo(new File(dbDirFile.getAbsolutePath() + "/" +
+                        FILE_NAME_WAL + FILE_TYPE_DELETE));
+                prevDataFile.renameTo(new File(dbDirFile.getAbsolutePath() + "/" +
+                        FILE_NAME_DATA + FILE_TYPE_DELETE));
 
-        } finally {
-            rwLock.writeLock().unlock();
-        }
+                // Now make bitsets point right.
+                dataInWalFile = dataInNextWalFile;
+                dataInNextFile = null;
+                dataInNextWalFile = null;
 
-        // 4. Delete old data and wal
-        if(!prevWalFile.delete()) {
-            // TODO: 09/07/20 log error
-        }
-        if(!prevDataFile.delete()) {
-            // TODO: 09/07/20 log error
+                // Rename *.next to *.current
+                nextWalFile.renameTo(new File(dbDirFile.getAbsolutePath() + "/" +
+                        FILE_NAME_WAL));
+                nextDataFile.renameTo(new File(dbDirFile.getAbsolutePath() + "/" +
+                        FILE_NAME_DATA));
+
+                // Move next file refs to current.
+                walFile = nextWalFile;
+                nextWalFile = null;
+                dataFile = nextDataFile;
+                nextDataFile = null;
+
+            } finally {
+                rwLock.writeLock().unlock();
+            }
+
+            // 4. Delete old data and wal
+            if (!prevWalFile.delete()) {
+                // TODO: 09/07/20 log error
+            }
+            if (!prevDataFile.delete()) {
+                // TODO: 09/07/20 log error
+            }
         }
     }
 
-    private void flushNext(DataOutputStream nextDataOut, ByteBuffer nextWriteBuffer,
-            int[] nextFileOffset) throws IOException {
+    private int flushNext(DataOutputStream nextDataOut, ByteBuffer nextWriteBuffer,
+            int nextFileOffset) throws IOException {
         nextDataOut.write(nextWriteBuffer.array(), 0, nextWriteBuffer.position());
         nextDataOut.flush();
 
         try {
             rwLock.writeLock().lock();
             for (int i = 0; i < nextWriteBuffer.position(); i += recordSize) {
-                index.put(nextWriteBuffer.getInt(i), nextFileOffset[0]++);
+                index.put(nextWriteBuffer.getInt(i), nextFileOffset++);
                 dataInNextFile.set(nextWriteBuffer.getInt(i));
             }
         } finally {
@@ -252,6 +303,8 @@ public class StormDB {
         }
 
         nextWriteBuffer.clear();
+
+        return nextFileOffset;
     }
 
     public void put(int key, byte[] value) throws IOException {
@@ -271,7 +324,6 @@ public class StormDB {
 
             if (writeBuffer.remaining() == 0) {
                 flush();
-                // TODO: 08/07/20 Have compaction called every 'n' flushes. Signal here.
             }
 
             // Write to the write buffer.
@@ -315,10 +367,17 @@ public class StormDB {
 
     private void iterate(final boolean useLatestWalFile, final boolean readInMemoryBuffer,
             final EntryConsumer consumer) throws IOException {
-        final RandomAccessFile walReader, dataReader;
-
+        final RandomAccessFile nextWalReader, walReader, dataReader;
+        byte[] inMemoryKeyValues;
         rwLock.readLock().lock();
         try {
+            if(nextWalFile != null) {
+                nextWalReader = new RandomAccessFile(nextWalFile, "r");
+                nextWalReader.seek(nextWalReader.length());
+            } else {
+                nextWalReader = null;
+            }
+
             // TODO: 05/07/2020 Keep a mem buffer since a block needs to be flushed fully for backwards iteration.
             // TODO: 05/07/2020 consider partial writes and alignment
             // TODO: 05/07/2020 best to ensure that the last 4 bytes are the sync bytes
@@ -329,8 +388,6 @@ public class StormDB {
                 walReader = null;
             }
 
-            // TODO: 08/07/20 If compaction is on, read both wal files in correct order
-
             if (dataFile.exists()) {
                 dataReader = new RandomAccessFile(dataFile, "r");
                 dataReader.seek(dataFile.length());
@@ -338,12 +395,12 @@ public class StormDB {
                 dataReader = null;
             }
 
-            // TODO: 08/07/20 Read memory buffer fully here as we are reading after leaving lock
+            inMemoryKeyValues = writeBuffer.array().clone();
         } finally {
             rwLock.readLock().unlock();
         }
 
-        final RandomAccessFile[] files = new RandomAccessFile[]{walReader, dataReader};
+        final RandomAccessFile[] files = new RandomAccessFile[]{nextWalReader, walReader, dataReader};
 
         // Always 4 MB, regardless of the value of this.blockSize. Since RandomAccessFile cannot
         // be buffered, we must make a large get request to the underlying native calls.
@@ -352,6 +409,8 @@ public class StormDB {
         final ByteBuffer buf = ByteBuffer.allocate(blockSize);
 
         final BitSet keysRead = new BitSet(index.size());
+
+        // TODO: 09/07/20 Read from inMemoryKeyValues
 
         // TODO: 09/07/20 Handle incomplete writes to disk while iteration. Needed esp. while recovery.
         for (RandomAccessFile file : files) {
@@ -375,7 +434,6 @@ public class StormDB {
                 // TODO: 05/07/2020 assert that this is in perfect alignment of 1 KV pair
                 buf.position(buf.limit());
 
-
                 while (buf.position() != 0) {
                     buf.position(buf.position() - recordSize);
                     final int key = buf.getInt();
@@ -394,16 +452,10 @@ public class StormDB {
         }
     }
 
-    private RandomAccessFile getRandomAccessFile(final int key) throws FileNotFoundException {
-        // TODO: 09/07/20 Use thread locals
-        return null;
-    }
-
     public byte[] randomGet(final int key) throws IOException {
         int offsetInData;
         RandomAccessFile f;
         byte[] value;
-        // TODO: 08/07/20 we cant read here and process later. REVISIT this.
         rwLock.readLock().lock();
         try {
             offsetInData = index.get(key);
@@ -412,28 +464,23 @@ public class StormDB {
             }
 
             value = new byte[valueSize];
-            if(dataInNextWalFile != null && dataInNextWalFile.get(key)) {
-                if (offsetInData >= writeOffsetWal) {
+            if (offsetInData >= writeOffsetWal) {
+                if((dataInNextWalFile != null && dataInNextWalFile.get(key))
+                        || dataInWalFile.get(key)) {
                     final int offsetInWriteBuffer = (offsetInData - writeOffsetWal) * recordSize;
-                    System.arraycopy(writeBuffer.array(), offsetInWriteBuffer + keySize, value, 0, valueSize);
+                    System.arraycopy(writeBuffer.array(), offsetInWriteBuffer + keySize, value, 0,
+                            valueSize);
                     return value;
-                } else {
-                    // TODO: 09/07/20  Replace below with efficient thread local logic.
-                    f = new RandomAccessFile(nextwalFile, "r");
                 }
+            }
+
+            // TODO: 09/07/20  Replace below with efficient thread local logic.
+            if(dataInNextWalFile != null && dataInNextWalFile.get(key)) {
+                f = new RandomAccessFile(nextWalFile, "r");
             } else if(dataInNextFile != null && dataInNextFile.get(key)) {
                 f = new RandomAccessFile(nextDataFile, "r");
-            }
-            else if (dataInWalFile.get(key)) {
-                // We should read from in-mem buffer only if compaction is not on.
-                if (dataInNextWalFile != null && offsetInData >= writeOffsetWal) {
-                    final int offsetInWriteBuffer = (offsetInData - writeOffsetWal) * recordSize;
-                    System.arraycopy(writeBuffer.array(), offsetInWriteBuffer + keySize, value, 0, valueSize);
-                    return value;
-                } else {
-                    // TODO: 09/07/20  Replace below with efficient thread local logic.
-                    f = new RandomAccessFile(walFile, "r");
-                }
+            } else if (dataInWalFile.get(key)) {
+                f = new RandomAccessFile(walFile, "r");
             } else {
                 f = new RandomAccessFile(dataFile, "r");
             }
@@ -482,8 +529,10 @@ public class StormDB {
                 // TODO: 07/07/2020 assert alignment
                 final int key = buf.getInt();
                 buf.position(buf.position() + valueSize);
-                // TODO: 08/07/20 Put it into 2-bit bitset
                 index.put(key, dataFileOffset);
+                if(walContext) {
+                    dataInWalFile.set(key);
+                }
 
                 dataFileOffset++;
             }
