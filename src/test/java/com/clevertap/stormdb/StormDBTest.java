@@ -2,7 +2,6 @@ package com.clevertap.stormdb;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import com.clevertap.stormdb.StormDB.KVConsumer;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -37,7 +36,7 @@ class StormDBTest {
         }
 
         // Iterate sequentially.
-        db.iterate(new KVConsumer() {
+        db.iterate(new EntryConsumer() {
             @Override
             public void accept(int key, byte[] data, int offset) {
                 final ByteBuffer value = ByteBuffer.wrap(data, offset, valueSize);

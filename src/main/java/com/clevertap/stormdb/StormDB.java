@@ -309,17 +309,12 @@ public class StormDB {
         }
     }
 
-    public interface KVConsumer {
-
-        void accept(final int key, final byte[] data, final int offset) throws IOException;
-    }
-
-    public void iterate(final KVConsumer consumer) throws IOException {
+    public void iterate(final EntryConsumer consumer) throws IOException {
         iterate(true, true, consumer);
     }
 
     private void iterate(final boolean useLatestWalFile, final boolean readInMemoryBuffer,
-            final KVConsumer consumer) throws IOException {
+            final EntryConsumer consumer) throws IOException {
         final RandomAccessFile walReader, dataReader;
 
         rwLock.readLock().lock();
