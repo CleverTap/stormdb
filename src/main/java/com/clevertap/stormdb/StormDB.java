@@ -254,6 +254,15 @@ public class StormDB {
         nextWriteBuffer.clear();
     }
 
+    public void put(final byte[] key, final byte[] value, final int valueOffset)
+            throws IOException {
+        put(ByteUtils.toInt(key, 0), value, valueOffset);
+    }
+
+    public void put(final byte[] key, final byte[] value) throws IOException {
+        put(ByteUtils.toInt(key, 0), value);
+    }
+
     public void put(int key, byte[] value) throws IOException {
         put(key, value, 0);
     }
