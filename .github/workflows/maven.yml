@@ -26,3 +26,4 @@ jobs:
       run: mvn --file pom.xml verify sonar:sonar
       env:
         SONAR_LOGIN_TOKEN: ${{ secrets.SONAR_LOGIN_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
