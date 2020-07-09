@@ -12,8 +12,10 @@ public class WALWriter {
     protected static final int FOUR_MB = 4 * 1024 * 1024;
 
     /**
-     * Theoretically, this can go somewhere up to 15 MB, however, the corresponding buffer size
-     * will be 1.5 GB. We leave this to 512 KB since it's a fairly high value.
+     * Theoretically, this can go somewhere up to 15 MB, however, the corresponding buffer size will
+     * be 1.5 GB. We leave this to 512 KB since it's a fairly high value.
+     * <p>
+     * Note: The hard limit is due to the fact that {@link ByteBuffer} accepts an int as its size.
      */
     protected static final int MAX_VALUE_SIZE = 512 * 1024;
 
