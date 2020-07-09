@@ -16,13 +16,33 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+
     - name: Set up JDK 1.8
       uses: actions/setup-java@v1
       with:
         java-version: 1.8
+
+    - name: Cache local Maven repository
+      uses: actions/cache@v2
+      with:
+        path: ~/.m2/repository
+        key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          ${{ runner.os }}-maven-
+
     - name: Build with Maven
       run: mvn -B package --file pom.xml
+
+    - name: Cache local Sonar cache
+      uses: actions/cache@v2
+      with:
+        path: ~/.sonar/cache
+        key: ${{ runner.os }}-sonar-${{ hashFiles('**/*.jar') }}
+        restore-keys: |
+          ${{ runner.os }}-sonar-
+
     - name: Run Sonar
       run: mvn --file pom.xml verify sonar:sonar
       env:
         SONAR_LOGIN_TOKEN: ${{ secrets.SONAR_LOGIN_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
