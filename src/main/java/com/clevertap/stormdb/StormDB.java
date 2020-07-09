@@ -1,5 +1,6 @@
 package com.clevertap.stormdb;
 
+import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import gnu.trove.map.hash.TIntIntHashMap;
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
@@ -27,6 +28,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 public class StormDB {
 
     private static final long COMPACTION_WAIT_TIMEOUT_MS = 1000 * 10 * 60; // 10 minutes
+
+    private static final int RESERVED_KEY_MARKER = 0xffffffff;
 
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
@@ -268,9 +271,8 @@ public class StormDB {
     }
 
     public void put(int key, byte[] value, int valueOffset) throws IOException {
-        if (key == Integer.MAX_VALUE) {
-            throw new RuntimeException("Key " + Integer.MAX_VALUE
-                    + " is a reserved key (used for internal computation)");
+        if (key == RESERVED_KEY_MARKER) {
+            throw new ReservedKeyException(RESERVED_KEY_MARKER);
         }
         rwLock.writeLock().lock();
 
