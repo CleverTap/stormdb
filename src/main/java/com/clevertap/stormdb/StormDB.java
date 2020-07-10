@@ -176,7 +176,7 @@ public class StormDB {
 
         byte[] buffer = new byte[FOUR_MB];
         int length;
-        while ((length = inStream.read(buffer)) > 0){
+        while ((length = inStream.read(buffer)) > 0) {
             outStream.write(buffer, 0, length);
         }
 
@@ -184,13 +184,13 @@ public class StormDB {
         outStream.close();
 
         // 2. For cleanliness sake, delete .next files.
-        if(!nextWalFile.delete()) {
+        if (!nextWalFile.delete()) {
             // TODO: 09/07/20 log error
         }
         File nextDataFile = new File(dbDirFile.getAbsolutePath() + "/" +
                 FILE_NAME_DATA + FILE_TYPE_NEXT);
-        if(nextDataFile.exists()) {
-            if(!nextDataFile.delete()) {
+        if (nextDataFile.exists()) {
+            if (!nextDataFile.delete()) {
                 // TODO: 09/07/20 log error
             }
         }
@@ -213,7 +213,7 @@ public class StormDB {
 
                 logger.info("Starting compaction. CurrentWriteWalOffset = " + writeOffsetWal);
                 // Check whether there was any data coming in. If not simply bail out.
-                if(writeOffsetWal == 0) {
+                if (writeOffsetWal == 0) {
                     return;
                 }
 
@@ -288,13 +288,13 @@ public class StormDB {
 
             // 4. Delete old data and wal
             if (walFileToDelete.exists()) {
-                if(!walFileToDelete.delete()) {
+                if (!walFileToDelete.delete()) {
                     // TODO: 09/07/20 log error
                     logger.warning("Unable to delete file - " + walFileToDelete.getName());
                 }
             }
             if (dataFileToDelete.exists()) {
-                if(!dataFileToDelete.delete()) {
+                if (!dataFileToDelete.delete()) {
                     // TODO: 09/07/20 log error
                     logger.warning("Unable to delete file - " + dataFileToDelete.getName());
                 }
@@ -387,7 +387,7 @@ public class StormDB {
         byte[] inMemoryKeyValues;
         rwLock.readLock().lock();
         try {
-            if(nextWalFile != null) {
+            if (nextWalFile != null) {
                 RandomAccessFile reader = getReadRandomAccessFile(walNextReader, nextWalFile);
                 reader.seek(reader.length());
                 files.add(reader);
@@ -473,7 +473,7 @@ public class StormDB {
 
             value = new byte[valueSize];
             if (offsetInData >= writeOffsetWal) {
-                if((dataInNextWalFile != null && dataInNextWalFile.get(key))
+                if ((dataInNextWalFile != null && dataInNextWalFile.get(key))
                         || dataInWalFile.get(key)) {
                     final int offsetInWriteBuffer = (offsetInData - writeOffsetWal) * recordSize;
                     System.arraycopy(writeBuffer.array(), offsetInWriteBuffer + keySize, value, 0,
@@ -482,9 +482,9 @@ public class StormDB {
                 }
             }
 
-            if(dataInNextWalFile != null && dataInNextWalFile.get(key)) {
+            if (dataInNextWalFile != null && dataInNextWalFile.get(key)) {
                 f = getReadRandomAccessFile(walNextReader, nextWalFile);
-            } else if(dataInNextFile != null && dataInNextFile.get(key)) {
+            } else if (dataInNextFile != null && dataInNextFile.get(key)) {
                 f = getReadRandomAccessFile(dataNextReader, nextDataFile);
             } else if (dataInWalFile.get(key)) {
                 f = getReadRandomAccessFile(walReader, walFile);
@@ -505,10 +505,11 @@ public class StormDB {
         return value;
     }
 
-    private static RandomAccessFileWrapper getReadRandomAccessFile(ThreadLocal<RandomAccessFileWrapper> reader,
+    private static RandomAccessFileWrapper getReadRandomAccessFile(
+            ThreadLocal<RandomAccessFileWrapper> reader,
             File file) throws FileNotFoundException {
         RandomAccessFileWrapper f = reader.get();
-        if(f == null || !f.isSameFile(file)) {
+        if (f == null || !f.isSameFile(file)) {
             f = new RandomAccessFileWrapper(file, "r");
             reader.set(f);
         }
@@ -547,7 +548,7 @@ public class StormDB {
                 final int key = buf.getInt();
                 buf.position(buf.position() + valueSize);
                 index.put(key, dataFileOffset);
-                if(walContext) {
+                if (walContext) {
                     dataInWalFile.set(key);
                 }
 

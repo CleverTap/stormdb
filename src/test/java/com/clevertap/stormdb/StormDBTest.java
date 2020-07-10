@@ -1,6 +1,6 @@
 package com.clevertap.stormdb;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -11,7 +11,6 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class StormDBTest {
@@ -79,11 +78,11 @@ class StormDBTest {
         verifyDb(db, totalRecords, kvCache);
 
         int count = 50;
-        while(count-- > 0) {
+        while (count-- > 0) {
             final ByteBuffer value = ByteBuffer.allocate(valueSize);
             long val = (long) (Math.random() * Long.MAX_VALUE);
             value.putLong(val); // Insert a random value.
-            final int randomKey = (int)(Math.random()*totalRecords);
+            final int randomKey = (int) (Math.random() * totalRecords);
             db.put(randomKey, value.array());
             kvCache.put(randomKey, val);
         }
@@ -97,7 +96,8 @@ class StormDBTest {
         verifyDb(db, totalRecords, kvCache);
     }
 
-    private void verifyDb(StormDB db, int records, HashMap<Integer, Long> kvCache) throws IOException {
+    private void verifyDb(StormDB db, int records, HashMap<Integer, Long> kvCache)
+            throws IOException {
         // Verify.
         for (int i = 0; i < records; i++) {
             final byte[] bytes = db.randomGet(i);
@@ -121,13 +121,13 @@ class StormDBTest {
             myWriter.close();
             System.out.println("Successfully wrote to the file.");
 
-            File file=new File(tempFileName);    //creates a new file instance
-            FileReader fr=new FileReader(file);   //reads the file
-            BufferedReader br=new BufferedReader(fr,128);  //creates a buffering character input stream
+            File file = new File(tempFileName);    //creates a new file instance
+            FileReader fr = new FileReader(file);   //reads the file
+            BufferedReader br = new BufferedReader(fr,
+                    128);  //creates a buffering character input stream
             int c = 0;
-            while((br.readLine())!=null)
-            {
-                if(c++ == totalLines / 2) {
+            while ((br.readLine()) != null) {
+                if (c++ == totalLines / 2) {
                     file.delete();
                     System.out.println(c);
                 }
