@@ -1,9 +1,17 @@
 package com.clevertap.stormdb;
 
+import static com.clevertap.stormdb.StormDB.CRC_SIZE;
+import static com.clevertap.stormdb.StormDB.KEY_SIZE;
+import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
+import static com.clevertap.stormdb.StormDB.RESERVED_KEY_MARKER;
+
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
+import com.clevertap.stormdb.utils.RecordUtil;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
+import java.util.zip.CRC32;
 
 /**
  * The {@link WriteBuffer} is a logical extension of the WAL file. For a random get, if the index
@@ -23,6 +31,8 @@ public class WriteBuffer {
     protected static final int MAX_VALUE_SIZE = 512 * 1024;
 
     private final ByteBuffer buffer;
+    private final int valueSize;
+    private final int recordSize;
 
     /**
      * Initialises a write buffer for the WAL file with the following specification:
@@ -38,21 +48,22 @@ public class WriteBuffer {
      * @param valueSize The size of each value in this database
      */
     public WriteBuffer(final int valueSize) throws ValueSizeTooLargeException {
+        this.valueSize = valueSize;
+        this.recordSize = valueSize + KEY_SIZE;
         if (valueSize > MAX_VALUE_SIZE) {
             throw new ValueSizeTooLargeException();
         }
 
-        final int recordSize = valueSize + 4; // Keys are always 4 bytes.
-        int recordsToBuffer = Math.max(FOUR_MB / recordSize, StormDB.RECORDS_PER_BLOCK);
+        int recordsToBuffer = Math.max(FOUR_MB / recordSize, RECORDS_PER_BLOCK);
 
         // Get to the nearest multiple of 128.
-        recordsToBuffer = (recordsToBuffer / StormDB.RECORDS_PER_BLOCK) * StormDB.RECORDS_PER_BLOCK;
+        recordsToBuffer = (recordsToBuffer / RECORDS_PER_BLOCK) * RECORDS_PER_BLOCK;
 
-        final int blocks = recordsToBuffer / StormDB.RECORDS_PER_BLOCK;
-        final int crcSize = 4;
+        final int blocks = recordsToBuffer / RECORDS_PER_BLOCK;
+
         // Each block will have 1 CRC and 1 sync marker (the sync marker is one kv pair)
-        final int writeBufferSize = blocks * StormDB.RECORDS_PER_BLOCK * recordSize
-                + (blocks * (crcSize + recordSize));
+        final int writeBufferSize = blocks * RECORDS_PER_BLOCK * recordSize
+                + (blocks * (CRC_SIZE + recordSize));
 
         buffer = ByteBuffer.allocate(writeBufferSize);
     }
@@ -62,7 +73,17 @@ public class WriteBuffer {
     }
 
     public int flush(final OutputStream out) throws IOException {
-        // TODO: 10/07/2020 pad with the last record if there are less than N records (128)
+        if (buffer.position() == 0) {
+            return 0;
+        }
+
+        // Fill the block with the last record, if required.
+        while ((RecordUtil.addressToIndex(recordSize, buffer.position(), true))
+                % RECORDS_PER_BLOCK != 0) {
+            final int key = buffer.getInt(buffer.position() - recordSize);
+            add(key, buffer.array(), buffer.position() - recordSize + KEY_SIZE);
+        }
+
         final int bytes = buffer.position();
         out.write(buffer.array(), 0, bytes);
         out.flush();
@@ -84,7 +105,28 @@ public class WriteBuffer {
 
     public int add(int key, byte[] value, int valueOffset) {
         final int address = buffer.position();
-        // TODO: 10/07/2020 add crc etc, at the end if required
+        buffer.putInt(key);
+        buffer.put(value, valueOffset, valueSize);
+
+        // Should we close this block?
+        // Don't close the block if the we're adding the sync marker kv pair.
+        if (key != RESERVED_KEY_MARKER) {
+            final int nextRecordIndex = RecordUtil.addressToIndex(
+                    recordSize, buffer.position(), true);
+            if (nextRecordIndex % RECORDS_PER_BLOCK == 0) {
+                closeBlock();
+            }
+        }
         return address;
+    }
+
+    private void closeBlock() {
+        final CRC32 crc32 = new CRC32();
+        final int blockSize = recordSize * RECORDS_PER_BLOCK;
+        crc32.update(buffer.array(), buffer.position() - blockSize, blockSize);
+        buffer.putInt((int) crc32.getValue());
+        final byte[] bytes = new byte[recordSize];
+        Arrays.fill(bytes, (byte) 0xFF);
+        add(StormDB.RESERVED_KEY_MARKER, bytes, 0);
     }
 }

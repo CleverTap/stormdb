@@ -35,10 +35,10 @@ public class StormDB {
     public static final int CRC_SIZE = 4; // CRC32.
     private static final long COMPACTION_WAIT_TIMEOUT_MS = 1000 * 10 * 60; // 10 minutes
 
-    private static final int RESERVED_KEY_MARKER = 0xffffffff;
+    protected static final int RESERVED_KEY_MARKER = 0xffffffff;
     private static final int NO_MAPPING_FOUND = 0xffffffff;
 
-    private static final int KEY_SIZE = 4;
+    protected static final int KEY_SIZE = 4;
 
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
