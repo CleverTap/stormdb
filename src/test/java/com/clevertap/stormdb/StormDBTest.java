@@ -2,6 +2,10 @@ package com.clevertap.stormdb;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -99,6 +103,39 @@ class StormDBTest {
             final byte[] bytes = db.randomGet(i);
             final ByteBuffer value = ByteBuffer.wrap(bytes);
             assertEquals(kvCache.get(i), value.getLong());
+        }
+    }
+
+    @Test
+    public void testMidWayDelete() throws IOException {
+        // This tests java bug highlighted below. Can remove later.
+        // https://stackoverflow.com/questions/991489/file-delete-returns-false-even-though-file-exists-file-canread-file-canw
+        final int totalLines = 1000000;
+        final Path path = Files.createTempDirectory("/testdelete");
+        final String tempFileName = path.toString() + "/temp.txt";
+        try {
+            FileWriter myWriter = new FileWriter(tempFileName);
+            for (int i = 0; i < totalLines; i++) {
+                myWriter.write("This is a test line.\n");
+            }
+            myWriter.close();
+            System.out.println("Successfully wrote to the file.");
+
+            File file=new File(tempFileName);    //creates a new file instance
+            FileReader fr=new FileReader(file);   //reads the file
+            BufferedReader br=new BufferedReader(fr,128);  //creates a buffering character input stream
+            int c = 0;
+            while((br.readLine())!=null)
+            {
+                if(c++ == totalLines / 2) {
+                    file.delete();
+                    System.out.println(c);
+                }
+            }
+            fr.close();    //closes the stream and release the resources
+        } catch (IOException e) {
+            System.out.println("An error occurred.");
+            e.printStackTrace();
         }
     }
 }

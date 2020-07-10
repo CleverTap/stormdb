@@ -252,35 +252,30 @@ public class StormDB {
             }
             nextDataOut.close();
 
-            File prevWalFile = walFile;
+            File walFileToDelete = new File(dbDirFile.getAbsolutePath() + "/" +
+                    FILE_NAME_WAL + FILE_TYPE_DELETE);
+            File dataFileToDelete = new File(dbDirFile.getAbsolutePath() + "/" +
+                    FILE_NAME_DATA + FILE_TYPE_DELETE);
+
             try {
                 rwLock.writeLock().lock();
 
                 // First rename prevWalFile and prevDataFile so that .next can be renamed
-                prevWalFile.renameTo(new File(dbDirFile.getAbsolutePath() + "/" +
-                        FILE_NAME_WAL + FILE_TYPE_DELETE));
-                prevDataFile.renameTo(new File(dbDirFile.getAbsolutePath() + "/" +
-                        FILE_NAME_DATA + FILE_TYPE_DELETE));
+                walFile.renameTo(walFileToDelete);
+                dataFile.renameTo(dataFileToDelete);
 
                 // Now make bitsets point right.
                 dataInWalFile = dataInNextWalFile;
                 dataInNextFile = null;
                 dataInNextWalFile = null;
 
+                // Create new file references for Thread locals to be aware of.
                 // Rename *.next to *.current
-                nextWalFile.renameTo(new File(dbDirFile.getAbsolutePath() + "/" +
-                        FILE_NAME_WAL));
-                nextDataFile.renameTo(new File(dbDirFile.getAbsolutePath() + "/" +
-                        FILE_NAME_DATA));
-
-                // Move next file refs to current.
-//                walFile = nextWalFile;
-                walFile = new File(dbDirFile.getAbsolutePath() + "/" +
-                        FILE_NAME_WAL);
+                walFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_WAL);
+                nextWalFile.renameTo(walFile);
                 nextWalFile = null;
-//                dataFile = nextDataFile;
-                dataFile = new File(dbDirFile.getAbsolutePath() + "/" +
-                        FILE_NAME_DATA);
+                dataFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_DATA);
+                nextDataFile.renameTo(dataFile);
                 nextDataFile = null;
 
             } finally {
@@ -288,19 +283,17 @@ public class StormDB {
             }
 
             // 4. Delete old data and wal
-//            if (!prevWalFile.delete()) {
-//                // TODO: 09/07/20 log error
-//            }
-//            if (!prevDataFile.delete()) {
-//                // TODO: 09/07/20 log error
-//            }
-            if (!new File(dbDirFile.getAbsolutePath() + "/" +
-                    FILE_NAME_WAL + FILE_TYPE_DELETE).delete()) {
-                // TODO: 09/07/20 log error
+            if (walFileToDelete.exists()) {
+                if(!walFileToDelete.delete()) {
+                    // TODO: 09/07/20 log error
+                    logger.warning("Unable to delete file - " + walFileToDelete.getName());
+                }
             }
-            if (!new File(dbDirFile.getAbsolutePath() + "/" +
-                    FILE_NAME_DATA + FILE_TYPE_DELETE).delete()) {
-                // TODO: 09/07/20 log error
+            if (dataFileToDelete.exists()) {
+                if(!dataFileToDelete.delete()) {
+                    // TODO: 09/07/20 log error
+                    logger.warning("Unable to delete file - " + dataFileToDelete.getName());
+                }
             }
             logger.info("Finished compaction.");
         }
