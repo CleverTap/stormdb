@@ -2,16 +2,18 @@ package com.clevertap.stormdb;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.clevertap.stormdb.exceptions.StormDBException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 
+// TODO: 10/07/2020 test with more than Integer.MAX_VALUE records
 class StormDBTest {
 
     @Test
-    void simpleTest() throws IOException {
+    void simpleTest() throws IOException, StormDBException {
         final Path path = Files.createTempDirectory("stormdb");
 
         final int valueSize = 28;

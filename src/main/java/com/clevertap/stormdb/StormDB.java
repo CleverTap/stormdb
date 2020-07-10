@@ -1,6 +1,10 @@
 package com.clevertap.stormdb;
 
+import com.clevertap.stormdb.exceptions.InconsistentDataException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
+import com.clevertap.stormdb.exceptions.StormDBException;
+import com.clevertap.stormdb.utils.ByteUtil;
+import com.clevertap.stormdb.utils.RecordUtil;
 import gnu.trove.map.hash.TIntIntHashMap;
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
@@ -27,9 +31,14 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  */
 public class StormDB {
 
+    public static final int RECORDS_PER_BLOCK = 128;
+    public static final int CRC_SIZE = 4; // CRC32.
     private static final long COMPACTION_WAIT_TIMEOUT_MS = 1000 * 10 * 60; // 10 minutes
 
     private static final int RESERVED_KEY_MARKER = 0xffffffff;
+    private static final int NO_MAPPING_FOUND = 0xffffffff;
+
+    private static final int KEY_SIZE = 4;
 
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
@@ -46,7 +55,7 @@ public class StormDB {
      */
     // TODO: 03/07/2020 change this map to one that is array based (saves 1/2 the size)
     private final TIntIntHashMap index = new TIntIntHashMap(10_000_000, 0.95f, Integer.MAX_VALUE,
-            Integer.MAX_VALUE);
+            NO_MAPPING_FOUND);
     // TODO: 08/07/20 Revisit bitset memory optimization later.
     private BitSet dataInWalFile = new BitSet();
     private BitSet dataInNextFile; // TODO: 09/07/20 We can get rid of this bitset. revisit.
@@ -66,12 +75,12 @@ public class StormDB {
      */
     private final int blockSize;
 
-    private final ByteBuffer writeBuffer;
+    private final WriteBuffer writeBuffer;
 
     private final int valueSize;
     private final int recordSize;
-    private final int keySize;
-    private int writeOffsetWal = -1; // Will be initialised on the first write.
+
+    private long bytesInWalFile = -1; // Will be initialised on the first write.
     private final File dbDirFile;
 
     private File dataFile;
@@ -85,17 +94,16 @@ public class StormDB {
     private final Object compactionSync = new Object();
     private boolean shutDown = false;
 
-    public StormDB(final int valueSize, final String dbDir) throws IOException {
+    public StormDB(final int valueSize, final String dbDir) throws IOException, StormDBException {
         this.valueSize = valueSize;
         dbDirFile = new File(dbDir);
         //noinspection ResultOfMethodCallIgnored
         dbDirFile.mkdirs();
 
-        keySize = 4;
-        recordSize = valueSize + keySize; // +4 for the key.
+        recordSize = valueSize + KEY_SIZE;
 
-        blockSize = (4096 / recordSize) * recordSize; // +4 for the key
-        writeBuffer = ByteBuffer.allocate((FOUR_MB / recordSize) * recordSize);
+        blockSize = (4096 / recordSize) * recordSize;
+        writeBuffer = new WriteBuffer(valueSize);
 
         dataFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_DATA);
         walFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_WAL);
@@ -132,7 +140,7 @@ public class StormDB {
         }
 
         walOut = new DataOutputStream(new FileOutputStream(walFile, true));
-        writeOffsetWal = (int) (walFile.length() / recordSize);
+        bytesInWalFile = walFile.length();
 
         if (walFile.length() % recordSize != 0) {
             // Corrupted WAL - somebody should run compact!
@@ -178,7 +186,7 @@ public class StormDB {
 
             // Create new walOut File
             walOut = new DataOutputStream(new FileOutputStream(nextwalFile));
-            writeOffsetWal = 0;
+            bytesInWalFile = 0;
 
             // TODO: 08/07/20 Remember to invalidate/refresh file handles in thread local
 
@@ -259,11 +267,11 @@ public class StormDB {
 
     public void put(final byte[] key, final byte[] value, final int valueOffset)
             throws IOException {
-        put(ByteUtils.toInt(key, 0), value, valueOffset);
+        put(ByteUtil.toInt(key, 0), value, valueOffset);
     }
 
     public void put(final byte[] key, final byte[] value) throws IOException {
-        put(ByteUtils.toInt(key, 0), value);
+        put(ByteUtil.toInt(key, 0), value);
     }
 
     public void put(int key, byte[] value) throws IOException {
@@ -280,16 +288,17 @@ public class StormDB {
             // TODO: 07/07/2020 Optimisation: if the current key is in the write buffer,
             // TODO: 07/07/2020 don't append, but perform an inplace update
 
-            if (writeBuffer.remaining() == 0) {
+            if (writeBuffer.isFull()) {
                 flush();
                 // TODO: 08/07/20 Have compaction called every 'n' flushes. Signal here.
             }
 
             // Write to the write buffer.
-            writeBuffer.putInt(key);
-            writeBuffer.put(value, valueOffset, valueSize);
+            final int addressInBuffer = writeBuffer.add(key, value, valueOffset);
 
-            index.put(key, writeOffsetWal + (writeBuffer.position() - recordSize) / recordSize);
+            final int address = RecordUtil.addressToIndex(recordSize,
+                    bytesInWalFile + addressInBuffer, true);
+            index.put(key, address);
 
             if (dataInNextWalFile != null) {
                 dataInNextWalFile.set(key);
@@ -307,14 +316,11 @@ public class StormDB {
         rwLock.writeLock().lock();
         try {
             // walOut is initialised on the first write to the writeBuffer.
-            if (walOut == null || writeBuffer.position() == 0) {
+            if (walOut == null || !writeBuffer.isDirty()) {
                 return;
             }
-            final int position = writeBuffer.position();
-            walOut.write(writeBuffer.array(), 0, position);
-            walOut.flush();
-            writeBuffer.clear();
-            writeOffsetWal += position / recordSize;
+
+            bytesInWalFile += writeBuffer.flush(walOut);
         } finally {
             rwLock.writeLock().unlock();
         }
@@ -399,7 +405,7 @@ public class StormDB {
 
                     // Do this again, since we read the buffer backwards too.
                     // -4 because we read the key only.
-                    buf.position(buf.position() - keySize);
+                    buf.position(buf.position() - KEY_SIZE);
                 }
             }
         }
@@ -410,61 +416,81 @@ public class StormDB {
         return null;
     }
 
-    public byte[] randomGet(final int key) throws IOException {
-        int offsetInData;
+    public byte[] randomGet(final int key) throws StormDBException, IOException {
+        int recordIndex;
         RandomAccessFile f;
         byte[] value;
         // TODO: 08/07/20 we cant read here and process later. REVISIT this.
+        final long absoluteAddress;
         rwLock.readLock().lock();
         try {
-            offsetInData = index.get(key);
-            if (offsetInData == Integer.MAX_VALUE) {
+            recordIndex = index.get(key);
+            if (recordIndex == NO_MAPPING_FOUND) { // No mapping value.
                 return null;
             }
 
             value = new byte[valueSize];
-            if(dataInNextWalFile != null && dataInNextWalFile.get(key)) {
-                if (offsetInData >= writeOffsetWal) {
-                    final int offsetInWriteBuffer = (offsetInData - writeOffsetWal) * recordSize;
-                    System.arraycopy(writeBuffer.array(), offsetInWriteBuffer + keySize, value, 0, valueSize);
+            if (dataInNextWalFile != null && dataInNextWalFile.get(key)) {
+                absoluteAddress = RecordUtil.indexToAddress(recordSize, recordIndex, true);
+                if (absoluteAddress >= bytesInWalFile) {
+                    final int recordAddress = (int) (absoluteAddress - bytesInWalFile);
+                    final int keyInData = ByteUtil.toInt(writeBuffer.array(), recordAddress);
+                    if (keyInData != key) {
+                        throw new InconsistentDataException();
+                    }
+                    System.arraycopy(writeBuffer.array(), recordAddress + KEY_SIZE,
+                            value, 0, valueSize);
                     return value;
                 } else {
                     // TODO: 09/07/20  Replace below with efficient thread local logic.
                     f = new RandomAccessFile(nextwalFile, "r");
                 }
-            } else if(dataInNextFile != null && dataInNextFile.get(key)) {
+            } else if (dataInNextFile != null && dataInNextFile.get(key)) {
+                absoluteAddress = RecordUtil.indexToAddress(recordSize, recordIndex, false);
                 f = new RandomAccessFile(nextDataFile, "r");
-            }
-            else if (dataInWalFile.get(key)) {
+            } else if (dataInWalFile.get(key)) {
+                // TODO: 10/07/2020 duplicate code path! same as dataInNextWalFile
                 // We should read from in-mem buffer only if compaction is not on.
-                if (dataInNextWalFile != null && offsetInData >= writeOffsetWal) {
-                    final int offsetInWriteBuffer = (offsetInData - writeOffsetWal) * recordSize;
-                    System.arraycopy(writeBuffer.array(), offsetInWriteBuffer + keySize, value, 0, valueSize);
+                absoluteAddress = RecordUtil.indexToAddress(recordSize, recordIndex, true);
+                if (dataInNextWalFile != null && absoluteAddress >= bytesInWalFile) {
+                    final int recordAddress = (int) (absoluteAddress - bytesInWalFile);
+                    final int keyInData = ByteUtil.toInt(writeBuffer.array(), recordAddress);
+                    if (keyInData != key) {
+                        throw new InconsistentDataException();
+                    }
+                    System.arraycopy(writeBuffer.array(), recordAddress + KEY_SIZE,
+                            value, 0, valueSize);
                     return value;
                 } else {
                     // TODO: 09/07/20  Replace below with efficient thread local logic.
                     f = new RandomAccessFile(walFile, "r");
                 }
             } else {
+                absoluteAddress = RecordUtil.indexToAddress(recordSize, recordIndex, false);
                 f = new RandomAccessFile(dataFile, "r");
             }
         } finally {
             rwLock.readLock().unlock();
         }
 
-        final long position = offsetInData * (long) recordSize;
-        f.seek(position + keySize); // +4 for the key.
+        f.seek(absoluteAddress);
+        if (f.readInt() != key) {
+            throw new InconsistentDataException();
+        }
         final int bytesRead = f.read(value);
         if (bytesRead != valueSize) {
             // TODO: 03/07/2020 perhaps it's more appropriate to return null (record lost)
-            throw new IOException("Corrupted");
+            throw new StormDBException("Possible data corruption detected!");
         }
         return value;
     }
 
     /**
-     * Builds a key to offset index by reading the following: 1. Data file (as a result of the last
-     * compaction) 2. WAL file (contains the most recently written records)
+     * Builds a key to record index by reading the following:
+     * <p>
+     * 1. Data file (as a result of the last compaction)
+     * <p>
+     * 2. WAL file (contains the most recently written records)
      * <p>
      * Both files are iterated over sequentially.
      */
@@ -478,7 +504,7 @@ public class StormDB {
 
         final ByteBuffer buf = ByteBuffer.allocate(blockSize);
 
-        int dataFileOffset = 0;
+        int recordIndex = 0;
 
         while (true) {
             buf.clear();
@@ -494,9 +520,9 @@ public class StormDB {
                 final int key = buf.getInt();
                 buf.position(buf.position() + valueSize);
                 // TODO: 08/07/20 Put it into 2-bit bitset
-                index.put(key, dataFileOffset);
+                index.put(key, recordIndex);
 
-                dataFileOffset++;
+                recordIndex++;
             }
         }
     }
