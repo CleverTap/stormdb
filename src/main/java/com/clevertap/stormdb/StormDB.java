@@ -13,6 +13,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.BitSet;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.logging.Logger;
 
 /**
  * Protocol: key (4 bytes) | value (fixed bytes).
@@ -83,6 +84,8 @@ public class StormDB {
     private final Object compactionLock = new Object();
     private boolean shutDown = false;
 
+    final Logger logger = Logger.getLogger("StormsDB");
+
     public StormDB(final int valueSize, final String dbDir) throws IOException {
         this.valueSize = valueSize;
         dbDirFile = new File(dbDir);
@@ -135,19 +138,20 @@ public class StormDB {
             throw new IOException("WAL file corrupted! Compact DB before writing again!");
         }
 
-        tCompaction = new Thread(() -> {
-            while (!shutDown) {
-                try {
-                    compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
-                    if(shouldCompact()) {
-                        compact();
-                    }
-                } catch (InterruptedException | IOException e) {
-                    e.printStackTrace();
-                }
-            }
-        });
-        tCompaction.start();
+        // TODO: 10/07/20 Revisit this bit
+//        tCompaction = new Thread(() -> {
+//            while (!shutDown) {
+//                try {
+//                    compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
+//                    if(shouldCompact()) {
+//                        compact();
+//                    }
+//                } catch (InterruptedException | IOException e) {
+//                    e.printStackTrace();
+//                }
+//            }
+//        });
+//        tCompaction.start();
     }
 
     private boolean shouldCompact() {
@@ -191,22 +195,23 @@ public class StormDB {
         compact();
     }
 
-    private void compact() throws IOException {
+    public void compact() throws IOException {
         synchronized (compactionLock) {
             File prevDataFile = dataFile;
             // 1. Move wal to wal.prev and create new wal file.
             try {
                 rwLock.writeLock().lock();
 
-                // Check whether there was any data coming in. If not simply bail out.
-                if(writeOffsetWal == 0) {
-                    return;
-                }
-
                 // First flush all data.
                 // This is because we will be resetting writeOffsetWal below and we need to get all
                 // buffer to file so that their offsets are honoured.
                 flush();
+
+                logger.info("Starting compaction. CurrentWriteWalOffset = " + writeOffsetWal);
+                // Check whether there was any data coming in. If not simply bail out.
+                if(writeOffsetWal == 0) {
+                    return;
+                }
 
                 // Now create wal bitset for next file
                 dataInNextFile = new BitSet();
@@ -245,6 +250,7 @@ public class StormDB {
             if (nextWriteBuffer.position() != 0) {
                 nextFileOffset[0] = flushNext(nextDataOut, nextWriteBuffer, nextFileOffset[0]);
             }
+            nextDataOut.close();
 
             File prevWalFile = walFile;
             try {
@@ -268,9 +274,13 @@ public class StormDB {
                         FILE_NAME_DATA));
 
                 // Move next file refs to current.
-                walFile = nextWalFile;
+//                walFile = nextWalFile;
+                walFile = new File(dbDirFile.getAbsolutePath() + "/" +
+                        FILE_NAME_WAL);
                 nextWalFile = null;
-                dataFile = nextDataFile;
+//                dataFile = nextDataFile;
+                dataFile = new File(dbDirFile.getAbsolutePath() + "/" +
+                        FILE_NAME_DATA);
                 nextDataFile = null;
 
             } finally {
@@ -278,12 +288,21 @@ public class StormDB {
             }
 
             // 4. Delete old data and wal
-            if (!prevWalFile.delete()) {
+//            if (!prevWalFile.delete()) {
+//                // TODO: 09/07/20 log error
+//            }
+//            if (!prevDataFile.delete()) {
+//                // TODO: 09/07/20 log error
+//            }
+            if (!new File(dbDirFile.getAbsolutePath() + "/" +
+                    FILE_NAME_WAL + FILE_TYPE_DELETE).delete()) {
                 // TODO: 09/07/20 log error
             }
-            if (!prevDataFile.delete()) {
+            if (!new File(dbDirFile.getAbsolutePath() + "/" +
+                    FILE_NAME_DATA + FILE_TYPE_DELETE).delete()) {
                 // TODO: 09/07/20 log error
             }
+            logger.info("Finished compaction.");
         }
     }
 
