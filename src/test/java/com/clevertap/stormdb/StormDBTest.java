@@ -111,7 +111,7 @@ class StormDBTest {
         // This tests java bug highlighted below. Can remove later.
         // https://stackoverflow.com/questions/991489/file-delete-returns-false-even-though-file-exists-file-canread-file-canw
         final int totalLines = 1000000;
-        final Path path = Files.createTempDirectory("/testdelete");
+        final Path path = Files.createTempDirectory("testdelete");
         final String tempFileName = path.toString() + "/temp.txt";
         try {
             FileWriter myWriter = new FileWriter(tempFileName);
