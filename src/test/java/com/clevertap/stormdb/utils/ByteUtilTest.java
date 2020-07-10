@@ -1,6 +1,6 @@
-package com.clevertap.stormdb;
+package com.clevertap.stormdb.utils;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.nio.ByteBuffer;
 import org.junit.jupiter.api.Test;
@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Created by Jude Pereira, at 14:41 on 09/07/2020.
  */
-class ByteUtilsTest {
+class ByteUtilTest {
 
     @Test
     void toInt() {
@@ -18,7 +18,7 @@ class ByteUtilsTest {
             final ByteBuffer buf = ByteBuffer.allocate(8);
             buf.position(2);
             buf.putInt(anInt);
-            assertEquals(anInt, ByteUtils.toInt(buf.array(), 2));
+            assertEquals(anInt, ByteUtil.toInt(buf.array(), 2));
         }
     }
 }

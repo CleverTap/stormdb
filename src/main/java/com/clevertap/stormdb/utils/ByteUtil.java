@@ -1,9 +1,9 @@
-package com.clevertap.stormdb;
+package com.clevertap.stormdb.utils;
 
 /**
  * Created by Jude Pereira, at 14:35 on 09/07/2020.
  */
-public class ByteUtils {
+public class ByteUtil {
 
     /**
      * Translates 4 bytes from the given byte array into an integer.
