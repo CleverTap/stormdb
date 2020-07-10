@@ -6,12 +6,15 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.List;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.Logger;
 
@@ -52,9 +55,10 @@ public class StormDB {
 
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
-    private final ThreadLocal<RandomAccessFile> walReader = new ThreadLocal<>();
-    private final ThreadLocal<RandomAccessFile> walReaderNext = new ThreadLocal<>();
-    private final ThreadLocal<RandomAccessFile> dataReader = new ThreadLocal<>();
+    private final ThreadLocal<RandomAccessFileWrapper> walReader = new ThreadLocal<>();
+    private final ThreadLocal<RandomAccessFileWrapper> walNextReader = new ThreadLocal<>();
+    private final ThreadLocal<RandomAccessFileWrapper> dataReader = new ThreadLocal<>();
+    private final ThreadLocal<RandomAccessFileWrapper> dataNextReader = new ThreadLocal<>();
 
 
     /**
@@ -379,40 +383,35 @@ public class StormDB {
 
     private void iterate(final boolean useLatestWalFile, final boolean readInMemoryBuffer,
             final EntryConsumer consumer) throws IOException {
-        final RandomAccessFile nextWalReader, walReader, dataReader;
+        List<RandomAccessFile> files = new ArrayList<>(3);
         byte[] inMemoryKeyValues;
         rwLock.readLock().lock();
         try {
             if(nextWalFile != null) {
-                nextWalReader = new RandomAccessFile(nextWalFile, "r");
-                nextWalReader.seek(nextWalReader.length());
-            } else {
-                nextWalReader = null;
+                RandomAccessFile reader = getReadRandomAccessFile(walNextReader, nextWalFile);
+                reader.seek(reader.length());
+                files.add(reader);
             }
 
             // TODO: 05/07/2020 Keep a mem buffer since a block needs to be flushed fully for backwards iteration.
             // TODO: 05/07/2020 consider partial writes and alignment
             // TODO: 05/07/2020 best to ensure that the last 4 bytes are the sync bytes
             if (walFile.exists()) {
-                walReader = new RandomAccessFile(walFile, "r");
-                walReader.seek(walFile.length());
-            } else {
-                walReader = null;
+                RandomAccessFile reader = getReadRandomAccessFile(walReader, walFile);
+                reader.seek(walFile.length());
+                files.add(reader);
             }
 
             if (dataFile.exists()) {
-                dataReader = new RandomAccessFile(dataFile, "r");
-                dataReader.seek(dataFile.length());
-            } else {
-                dataReader = null;
+                RandomAccessFile reader = getReadRandomAccessFile(walReader, dataFile);
+                reader.seek(dataFile.length());
+                files.add(reader);
             }
 
             inMemoryKeyValues = writeBuffer.array().clone();
         } finally {
             rwLock.readLock().unlock();
         }
-
-        final RandomAccessFile[] files = new RandomAccessFile[]{nextWalReader, walReader, dataReader};
 
         // Always 4 MB, regardless of the value of this.blockSize. Since RandomAccessFile cannot
         // be buffered, we must make a large get request to the underlying native calls.
@@ -426,9 +425,6 @@ public class StormDB {
 
         // TODO: 09/07/20 Handle incomplete writes to disk while iteration. Needed esp. while recovery.
         for (RandomAccessFile file : files) {
-            if (file == null) {
-                continue;
-            }
             while (file.getFilePointer() != 0) {
                 buf.clear();
 
@@ -486,15 +482,14 @@ public class StormDB {
                 }
             }
 
-            // TODO: 09/07/20  Replace below with efficient thread local logic.
             if(dataInNextWalFile != null && dataInNextWalFile.get(key)) {
-                f = new RandomAccessFile(nextWalFile, "r");
+                f = getReadRandomAccessFile(walNextReader, nextWalFile);
             } else if(dataInNextFile != null && dataInNextFile.get(key)) {
-                f = new RandomAccessFile(nextDataFile, "r");
+                f = getReadRandomAccessFile(dataNextReader, nextDataFile);
             } else if (dataInWalFile.get(key)) {
-                f = new RandomAccessFile(walFile, "r");
+                f = getReadRandomAccessFile(walReader, walFile);
             } else {
-                f = new RandomAccessFile(dataFile, "r");
+                f = getReadRandomAccessFile(dataReader, dataFile);
             }
         } finally {
             rwLock.readLock().unlock();
@@ -508,6 +503,16 @@ public class StormDB {
             throw new IOException("Corrupted");
         }
         return value;
+    }
+
+    private static RandomAccessFileWrapper getReadRandomAccessFile(ThreadLocal<RandomAccessFileWrapper> reader,
+            File file) throws FileNotFoundException {
+        RandomAccessFileWrapper f = reader.get();
+        if(f == null || !f.isSameFile(file)) {
+            f = new RandomAccessFileWrapper(file, "r");
+            reader.set(f);
+        }
+        return f;
     }
 
     /**
