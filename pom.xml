@@ -12,6 +12,7 @@
         <sonar.projectKey>CleverTap_stormdb</sonar.projectKey>
         <sonar.organization>clevertap</sonar.organization>
         <sonar.host.url>https://sonarcloud.io</sonar.host.url>
+        <!--suppress UnresolvedMavenProperty -->
         <sonar.login>${env.SONAR_LOGIN_TOKEN}</sonar.login>
     </properties>
 
