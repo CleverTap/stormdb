@@ -5,6 +5,8 @@ An embeddable, persistent key-value store optimised for sequential reads.
 and is not yet ready for production usage.
 
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=CleverTap_stormdb&metric=alert_status)](https://sonarcloud.io/dashboard?id=CleverTap_stormdb)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=CleverTap_stormdb&metric=coverage)](https://sonarcloud.io/dashboard?id=CleverTap_stormdb)
+[![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=CleverTap_stormdb&metric=security_rating)](https://sonarcloud.io/dashboard?id=CleverTap_stormdb)
 
 ## Goals
 - High speed sequential read
