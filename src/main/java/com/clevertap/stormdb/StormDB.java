@@ -3,7 +3,6 @@ package com.clevertap.stormdb;
 import com.clevertap.stormdb.exceptions.InconsistentDataException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import com.clevertap.stormdb.exceptions.StormDBException;
-import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
 import com.clevertap.stormdb.utils.ByteUtil;
 import com.clevertap.stormdb.utils.RecordUtil;
 import gnu.trove.map.hash.TIntIntHashMap;
@@ -223,9 +222,10 @@ public class StormDB {
                 // buffer to file so that their offsets are honoured.
                 flush();
 
-                logger.info("Starting compaction. CurrentWriteWalOffset = " + writeOffsetWal);
+                // TODO: 10/07/2020 revise message
+                logger.info("Starting compaction. CurrentWriteWalOffset = " + bytesInWalFile);
                 // Check whether there was any data coming in. If not simply bail out.
-                if (writeOffsetWal == 0) {
+                if (bytesInWalFile == 0) {
                     return;
                 }
 
@@ -478,11 +478,12 @@ public class StormDB {
         }
     }
 
-    public byte[] randomGet(final int key) throws IOException {
-        int offsetInData;
+    public byte[] randomGet(final int key) throws IOException, StormDBException {
+        int recordIndex;
         RandomAccessFile f;
         byte[] value;
         rwLock.readLock().lock();
+        final long address;
         try {
             recordIndex = index.get(key);
             if (recordIndex == NO_MAPPING_FOUND) { // No mapping value.
@@ -490,14 +491,16 @@ public class StormDB {
             }
 
             value = new byte[valueSize];
-            if (offsetInData >= writeOffsetWal) {
-                if ((dataInNextWalFile != null && dataInNextWalFile.get(key))
-                        || dataInWalFile.get(key)) {
-                    final int offsetInWriteBuffer = (offsetInData - writeOffsetWal) * recordSize;
-                    System.arraycopy(writeBuffer.array(), offsetInWriteBuffer + keySize, value, 0,
-                            valueSize);
+            if ((dataInNextWalFile != null && dataInNextWalFile.get(key))
+                    || dataInWalFile.get(key)) {
+                address = RecordUtil.indexToAddress(recordSize, recordIndex, true);
+                if (address >= bytesInWalFile) {
+                    System.arraycopy(writeBuffer.array(), (int) (address - bytesInWalFile),
+                            value, 0, valueSize);
                     return value;
                 }
+            } else {
+                address = RecordUtil.indexToAddress(recordSize, recordIndex, false);
             }
 
             if (dataInNextWalFile != null && dataInNextWalFile.get(key)) {
@@ -513,7 +516,7 @@ public class StormDB {
             rwLock.readLock().unlock();
         }
 
-        f.seek(absoluteAddress);
+        f.seek(address);
         if (f.readInt() != key) {
             throw new InconsistentDataException();
         }

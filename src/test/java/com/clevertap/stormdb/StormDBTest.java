@@ -53,7 +53,7 @@ class StormDBTest {
     }
 
     @Test
-    void compactionTest() throws IOException {
+    void compactionTest() throws IOException, StormDBException {
         final Path path = Files.createTempDirectory("stormdb");
 
         final int valueSize = 8;
@@ -99,7 +99,7 @@ class StormDBTest {
     }
 
     private void verifyDb(StormDB db, int records, HashMap<Integer, Long> kvCache)
-            throws IOException {
+            throws IOException, StormDBException {
         // Verify.
         for (int i = 0; i < records; i++) {
             final byte[] bytes = db.randomGet(i);
