@@ -495,8 +495,8 @@ public class StormDB {
                     || dataInWalFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex, true);
                 if (address >= bytesInWalFile) {
-                    System.arraycopy(writeBuffer.array(), (int) (address - bytesInWalFile),
-                            value, 0, valueSize);
+                    System.arraycopy(writeBuffer.array(),
+                            (int) (address - bytesInWalFile) + KEY_SIZE, value, 0, valueSize);
                     return value;
                 }
             } else {
