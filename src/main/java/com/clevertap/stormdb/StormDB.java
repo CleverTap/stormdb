@@ -77,6 +77,7 @@ public class StormDB {
     private final int keySize;
     private int writeOffsetWal = -1; // Will be initialised on the first write.
     private final File dbDirFile;
+    private boolean autoCompact;
 
     private File dataFile;
     private File walFile;
@@ -92,9 +93,10 @@ public class StormDB {
 
     final Logger logger = Logger.getLogger("StormsDB");
 
-    public StormDB(final int valueSize, final String dbDir) throws IOException {
+    public StormDB(final int valueSize, final String dbDir, final boolean autoCompact) throws IOException {
         this.valueSize = valueSize;
         dbDirFile = new File(dbDir);
+        this.autoCompact = autoCompact;
         //noinspection ResultOfMethodCallIgnored
         dbDirFile.mkdirs();
 
@@ -145,21 +147,23 @@ public class StormDB {
         }
 
         // TODO: 13/07/20 Make auto compaction configurable.
-        tCompaction = new Thread(() -> {
-            while (!shutDown) {
-                try {
-                    synchronized (compactionSync) {
-                        compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
+        if(this.autoCompact) {
+            tCompaction = new Thread(() -> {
+                while (!shutDown) {
+                    try {
+                        synchronized (compactionSync) {
+                            compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
+                        }
+                        if (shouldCompact()) {
+                            compact();
+                        }
+                    } catch (InterruptedException | IOException e) {
+                        e.printStackTrace();
                     }
-                    if(shouldCompact()) {
-                        compact();
-                    }
-                } catch (InterruptedException | IOException e) {
-                    e.printStackTrace();
                 }
-            }
-        });
-        tCompaction.start();
+            });
+            tCompaction.start();
+        }
     }
 
     private boolean shouldCompact() {
@@ -203,6 +207,8 @@ public class StormDB {
         compact();
     }
 
+    // TODO: 13/07/20 Handle case where compaction takes too long.
+    // TODO: 13/07/20 Handle case where compaction thread keeps failing.
     public void compact() throws IOException {
         synchronized (compactionLock) {
             File prevDataFile = dataFile;
@@ -578,9 +584,11 @@ public class StormDB {
     public void close() throws IOException, InterruptedException {
         flush();
         shutDown = true;
-        synchronized (compactionSync) {
-            compactionSync.notify();
+        if(this.autoCompact) {
+            synchronized (compactionSync) {
+                compactionSync.notify();
+            }
+            tCompaction.join();
         }
-        tCompaction.join();
     }
 }
