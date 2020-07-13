@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 /**
@@ -29,7 +30,8 @@ import java.util.logging.Logger;
  */
 public class StormDB {
 
-    private static final long COMPACTION_WAIT_TIMEOUT_MS = 1000 * 10 * 60; // 10 minutes
+    // TODO: 13/07/20 Make it configurable
+    private static final long COMPACTION_WAIT_TIMEOUT_MS = 1000 * 1 * 60; // 1 minute for now.
 
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
@@ -142,20 +144,22 @@ public class StormDB {
             throw new IOException("WAL file corrupted! Compact DB before writing again!");
         }
 
-        // TODO: 10/07/20 Revisit this bit
-//        tCompaction = new Thread(() -> {
-//            while (!shutDown) {
-//                try {
-//                    compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
-//                    if(shouldCompact()) {
-//                        compact();
-//                    }
-//                } catch (InterruptedException | IOException e) {
-//                    e.printStackTrace();
-//                }
-//            }
-//        });
-//        tCompaction.start();
+        // TODO: 13/07/20 Make auto compaction configurable.
+        tCompaction = new Thread(() -> {
+            while (!shutDown) {
+                try {
+                    synchronized (compactionSync) {
+                        compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
+                    }
+                    if(shouldCompact()) {
+                        compact();
+                    }
+                } catch (InterruptedException | IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+        tCompaction.start();
     }
 
     private boolean shouldCompact() {
@@ -340,6 +344,7 @@ public class StormDB {
 
             if (writeBuffer.remaining() == 0) {
                 flush();
+                // TODO: 13/07/20 Make a sync.notify call for compaction if needed.
             }
 
             // Write to the write buffer.
@@ -384,10 +389,10 @@ public class StormDB {
     private void iterate(final boolean useLatestWalFile, final boolean readInMemoryBuffer,
             final EntryConsumer consumer) throws IOException {
         List<RandomAccessFile> files = new ArrayList<>(3);
-        byte[] inMemoryKeyValues;
+        byte[] inMemoryKeyValues = null;
         rwLock.readLock().lock();
         try {
-            if (nextWalFile != null) {
+            if (nextWalFile != null && useLatestWalFile) {
                 RandomAccessFile reader = getReadRandomAccessFile(walNextReader, nextWalFile);
                 reader.seek(reader.length());
                 files.add(reader);
@@ -408,7 +413,9 @@ public class StormDB {
                 files.add(reader);
             }
 
-            inMemoryKeyValues = writeBuffer.array().clone();
+            if(readInMemoryBuffer) {
+                inMemoryKeyValues = writeBuffer.array().clone();
+            }
         } finally {
             rwLock.readLock().unlock();
         }
@@ -421,7 +428,35 @@ public class StormDB {
 
         final BitSet keysRead = new BitSet(index.size());
 
-        // TODO: 09/07/20 Read from inMemoryKeyValues
+        final Consumer<Integer> consumeBufferReverse = (bytesRead) -> {
+            buf.limit(bytesRead);
+            // TODO: 05/07/2020 assert that this is in perfect alignment of 1 KV pair
+            buf.position(buf.limit());
+
+            while (buf.position() != 0) {
+                buf.position(buf.position() - recordSize);
+                final int key = buf.getInt();
+                // TODO: 08/07/2020 if we need to support the whole range of 4 billion keys, we should use a long as the bitset is +ve
+                final boolean b = keysRead.get(key);
+                if (!b) {
+                    try {
+                        consumer.accept(key, buf.array(), buf.position());
+                    } catch (IOException e) {
+                        // TODO: 13/07/20 Throw custom exception instead.
+                    }
+                    keysRead.set(key);
+                }
+
+                // Do this again, since we read the buffer backwards too.
+                // -4 because we read the key only.
+                buf.position(buf.position() - keySize);
+            }
+        };
+
+        if(readInMemoryBuffer) {
+            buf.put(inMemoryKeyValues, 0, inMemoryKeyValues.length);
+            consumeBufferReverse.accept(inMemoryKeyValues.length);
+        }
 
         // TODO: 09/07/20 Handle incomplete writes to disk while iteration. Needed esp. while recovery.
         for (RandomAccessFile file : files) {
@@ -438,24 +473,7 @@ public class StormDB {
 
                 // Note: There's the possibility that we'll read the head of the file twice,
                 // but that's okay, since we iterate in a backwards fashion.
-                buf.limit(bytesRead);
-                // TODO: 05/07/2020 assert that this is in perfect alignment of 1 KV pair
-                buf.position(buf.limit());
-
-                while (buf.position() != 0) {
-                    buf.position(buf.position() - recordSize);
-                    final int key = buf.getInt();
-                    // TODO: 08/07/2020 if we need to support the whole range of 4 billion keys, we should use a long as the bitset is +ve
-                    final boolean b = keysRead.get(key);
-                    if (!b) {
-                        consumer.accept(key, buf.array(), buf.position());
-                        keysRead.set(key);
-                    }
-
-                    // Do this again, since we read the buffer backwards too.
-                    // -4 because we read the key only.
-                    buf.position(buf.position() - keySize);
-                }
+                consumeBufferReverse.accept(bytesRead);
             }
         }
     }
@@ -560,7 +578,9 @@ public class StormDB {
     public void close() throws IOException, InterruptedException {
         flush();
         shutDown = true;
-        compactionSync.notify();
+        synchronized (compactionSync) {
+            compactionSync.notify();
+        }
         tCompaction.join();
     }
 }
