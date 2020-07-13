@@ -4,9 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
+import com.sun.xml.internal.messaging.saaj.util.ByteOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -107,5 +110,39 @@ class WriteBufferTest {
 
         // Ensure that nothing else was written.
         assertFalse(bytesWritten.hasRemaining());
+    }
+
+    @Test
+    void verifyDirty() throws ValueSizeTooLargeException {
+        final WriteBuffer buf = new WriteBuffer(100);
+        assertFalse(buf.isDirty());
+        buf.add(10, new byte[100], 0);
+        assertTrue(buf.isDirty());
+    }
+
+    @Test
+    void verifyArrayNotNull() throws ValueSizeTooLargeException {
+        final WriteBuffer buf = new WriteBuffer(100);
+        assertNotNull(buf.array());
+    }
+
+    @Test
+    void verifyEmptyFlush() throws ValueSizeTooLargeException, IOException {
+        final WriteBuffer buf = new WriteBuffer(100);
+        final ByteOutputStream out = new ByteOutputStream();
+        assertEquals(0, buf.flush(out));
+        assertEquals(0, out.getCount());
+    }
+
+    @Test
+    void verifyFull() throws ValueSizeTooLargeException {
+        final WriteBuffer buf = new WriteBuffer(100);
+        assertFalse(buf.isFull());
+
+        for (int i = 0; i < buf.getMaxRecords(); i++) {
+            buf.add(i, new byte[100], 0);
+        }
+
+        assertTrue(buf.isFull());
     }
 }

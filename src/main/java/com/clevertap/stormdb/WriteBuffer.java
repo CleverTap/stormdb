@@ -33,6 +33,7 @@ public class WriteBuffer {
     private final ByteBuffer buffer;
     private final int valueSize;
     private final int recordSize;
+    private final int maxRecords;
 
     /**
      * Initialises a write buffer for the WAL file with the following specification:
@@ -58,6 +59,7 @@ public class WriteBuffer {
 
         // Get to the nearest multiple of 128.
         recordsToBuffer = (recordsToBuffer / RECORDS_PER_BLOCK) * RECORDS_PER_BLOCK;
+        this.maxRecords = recordsToBuffer;
 
         final int blocks = recordsToBuffer / RECORDS_PER_BLOCK;
 
@@ -66,6 +68,10 @@ public class WriteBuffer {
                 + (blocks * (CRC_SIZE + recordSize));
 
         buffer = ByteBuffer.allocate(writeBufferSize);
+    }
+
+    public int getMaxRecords() {
+        return maxRecords;
     }
 
     protected int getWriteBufferSize() {
