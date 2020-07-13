@@ -109,7 +109,7 @@ class StormDBTest {
     }
 
     @Test
-    public void testMidWayDelete() throws IOException {
+    public void testMidWayFileDelete() throws IOException {
         // This tests java bug highlighted below. Can remove later.
         // https://stackoverflow.com/questions/991489/file-delete-returns-false-even-though-file-exists-file-canread-file-canw
         final int totalLines = 1000000;
