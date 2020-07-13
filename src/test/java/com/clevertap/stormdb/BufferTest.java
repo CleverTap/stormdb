@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
-import com.sun.xml.internal.messaging.saaj.util.ByteOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -140,9 +139,9 @@ class BufferTest {
     @Test
     void verifyEmptyFlush() throws ValueSizeTooLargeException, IOException {
         final Buffer buf = newBuffer(100);
-        final ByteOutputStream out = new ByteOutputStream();
+        final ByteArrayOutputStream out = new ByteArrayOutputStream();
         assertEquals(0, buf.flush(out));
-        assertEquals(0, out.getCount());
+        assertEquals(0, out.size());
     }
 
     @Test
