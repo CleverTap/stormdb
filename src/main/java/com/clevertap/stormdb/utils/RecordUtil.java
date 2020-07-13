@@ -8,6 +8,9 @@ import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
  */
 public class RecordUtil {
 
+    private RecordUtil() {
+    }
+
     public static int blockSizeWithTrailer(final int recordSize) {
         return recordSize * RECORDS_PER_BLOCK + CRC_SIZE + recordSize;
     }

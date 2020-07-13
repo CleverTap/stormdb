@@ -23,7 +23,8 @@ import java.util.BitSet;
 import java.util.Enumeration;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Protocol: key (4 bytes) | value (fixed bytes).
@@ -39,7 +40,7 @@ public class StormDB {
     public static final int RECORDS_PER_BLOCK = 128;
     public static final int CRC_SIZE = 4; // CRC32.
     // TODO: 13/07/20 Make it configurable
-    private static final long COMPACTION_WAIT_TIMEOUT_MS = 1000 * 1 * 60; // 1 minute for now.
+    private static final long COMPACTION_WAIT_TIMEOUT_MS = (long) 1000 * 60; // 1 minute for now.
 
     protected static final int RESERVED_KEY_MARKER = 0xffffffff;
     private static final int NO_MAPPING_FOUND = 0xffffffff;
@@ -61,7 +62,7 @@ public class StormDB {
      * Note: Negative offset indicates an offset in the
      */
     // TODO: 03/07/2020 change this map to one that is array based (saves 1/2 the size)
-    private final TIntIntHashMap index = new TIntIntHashMap(10_000_000, 0.95f, Integer.MAX_VALUE,
+    private final TIntIntHashMap index = new TIntIntHashMap(100_000, 0.95f, Integer.MAX_VALUE,
             NO_MAPPING_FOUND);
     // TODO: 08/07/20 Revisit bitset memory optimization later.
     private BitSet dataInWalFile = new BitSet();
@@ -104,13 +105,14 @@ public class StormDB {
     private final Object compactionLock = new Object();
     private boolean shutDown = false;
 
-    private static final Logger LOG = Logger.getLogger(StormDB.class.getSimpleName());
+    private static final Logger LOG = LoggerFactory.getLogger(StormDB.class);
 
-    public StormDB(int valueSize, String dbDir) throws IOException, StormDBException {
+    public StormDB(int valueSize, String dbDir) throws IOException {
         this(valueSize, dbDir, true);
     }
 
-    public StormDB(final int valueSize, final String dbDir, final boolean autoCompact) throws IOException, StormDBException {
+    public StormDB(final int valueSize, final String dbDir, final boolean autoCompact)
+            throws IOException {
         this.valueSize = valueSize;
         dbDirFile = new File(dbDir);
         this.autoCompact = autoCompact;
@@ -122,8 +124,8 @@ public class StormDB {
         blockSize = (4096 / recordSize) * recordSize;
         buffer = new Buffer(valueSize, false, true);
 
-        dataFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_DATA);
-        walFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_WAL);
+        dataFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA);
+        walFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_WAL);
 
         // Open DB.
         final File metaFile = new File(dbDir + "/meta");
@@ -140,7 +142,7 @@ public class StormDB {
             }
 
             // Now do compaction if we stopped just while doing compaction.
-            if (new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_DATA +
+            if (new File(dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA +
                     FILE_TYPE_NEXT).exists()) {
                 // Recover implicitly builds index.
                 recover();
@@ -159,27 +161,31 @@ public class StormDB {
 
         if (walFile.length() % recordSize != 0) {
             // Corrupted WAL - somebody should run compact!
-            throw new IOException("WAL file corrupted! Compact DB before writing again!");
+            recover();
         }
 
         // TODO: 13/07/20 Make auto compaction configurable.
-        if(this.autoCompact) {
-            tCompaction = new Thread(() -> {
-                while (!shutDown) {
-                    try {
-                        synchronized (compactionSync) {
-                            compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
-                        }
-                        if (shouldCompact()) {
-                            compact();
-                        }
-                    } catch (InterruptedException | IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-            });
-            tCompaction.start();
+        if (this.autoCompact) {
+            setupCompactionThread();
         }
+    }
+
+    private void setupCompactionThread() {
+        tCompaction = new Thread(() -> {
+            while (!shutDown) {
+                try {
+                    synchronized (compactionSync) {
+                        compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
+                    }
+                    if (shouldCompact()) {
+                        compact();
+                    }
+                } catch (InterruptedException | IOException e) { // NOSONAR - there's nothing else that we can do.
+                    LOG.error("Compaction failure!", e);
+                }
+            }
+        });
+        tCompaction.start();
     }
 
     private boolean shouldCompact() {
@@ -191,43 +197,43 @@ public class StormDB {
         // This scenario can happen only at start.
 
         // 1. Simply append wal.next to wal file and compact
-        File nextWalFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_DATA +
-                FILE_TYPE_NEXT);
-        File currentWalFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_DATA);
+        File nextWalFile = new File(
+                dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA + FILE_TYPE_NEXT);
+        File currentWalFile = new File(
+                dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA);
 
-        FileInputStream inStream = new FileInputStream(nextWalFile);
-        FileOutputStream outStream = new FileOutputStream(currentWalFile, true);
+        try (FileInputStream inStream = new FileInputStream(nextWalFile);
+                FileOutputStream outStream = new FileOutputStream(currentWalFile, true)) {
 
-        byte[] buffer = new byte[FOUR_MB];
-        int length;
-        while ((length = inStream.read(buffer)) > 0) {
-            outStream.write(buffer, 0, length);
-        }
-
-        inStream.close();
-        outStream.close();
-
-        // 2. For cleanliness sake, delete .next files.
-        if (!nextWalFile.delete()) {
-            // TODO: 09/07/20 log error
-        }
-        File nextDataFile = new File(dbDirFile.getAbsolutePath() + "/" +
-                FILE_NAME_DATA + FILE_TYPE_NEXT);
-        if (nextDataFile.exists()) {
-            if (!nextDataFile.delete()) {
-                // TODO: 09/07/20 log error
+            byte[] buffer = new byte[FOUR_MB];
+            int length;
+            while ((length = inStream.read(buffer)) > 0) {
+                outStream.write(buffer, 0, length);
             }
         }
 
+        // 2. For cleanliness sake, delete .next files.
+        Files.deleteIfExists(nextWalFile.toPath());
+        File nextDataFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
+                FILE_NAME_DATA + FILE_TYPE_NEXT);
+
+        Files.deleteIfExists(nextDataFile.toPath());
+
         // 3. Now finally call the compact procedure
         compact();
+    }
+
+    private void rename(final File file, final File destination) throws IOException {
+        if (!file.renameTo(destination)) {
+            throw new IOException("Failed to rename " + file.getAbsolutePath()
+                    + " to " + destination.getAbsolutePath());
+        }
     }
 
     // TODO: 13/07/20 Handle case where compaction takes too long.
     // TODO: 13/07/20 Handle case where compaction thread keeps failing.
     public void compact() throws IOException {
         synchronized (compactionLock) {
-            File prevDataFile = dataFile;
             // 1. Move wal to wal.prev and create new wal file.
             try {
                 rwLock.writeLock().lock();
@@ -238,7 +244,7 @@ public class StormDB {
                 flush();
 
                 // TODO: 10/07/2020 revise message
-                LOG.info("Starting compaction. CurrentWriteWalOffset = " + bytesInWalFile);
+                LOG.info("Beginning compaction with bytesInWalFile={}", bytesInWalFile);
                 // Check whether there was any data coming in. If not simply bail out.
                 if (bytesInWalFile == 0) {
                     return;
@@ -248,7 +254,7 @@ public class StormDB {
                 dataInNextFile = new BitSet();
                 dataInNextWalFile = new BitSet();
 
-                nextWalFile = new File(dbDirFile.getAbsolutePath() + "/" +
+                nextWalFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
                         FILE_NAME_WAL + FILE_TYPE_NEXT);
 
                 // Create new walOut File
@@ -263,39 +269,39 @@ public class StormDB {
 
             // 2. Process wal.current file and out to data.next file.
             // 3. Process data.current file.
-            nextDataFile = new File(dbDirFile.getAbsolutePath() + "/" +
+            nextDataFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
                     FILE_NAME_DATA + FILE_TYPE_NEXT);
 
-            final DataOutput out = new DataOutput(
+            try (final DataOutput out = new DataOutput(
                     new BufferedOutputStream(new FileOutputStream(nextDataFile),
-                            buffer.getWriteBufferSize()));
+                            buffer.getWriteBufferSize()))) {
 
-            final Buffer buffer = new Buffer(valueSize, false, false);
+                final Buffer tmpBuffer = new Buffer(valueSize, false, false);
 
-            iterate(false, false, (key, data, offset) -> {
-                buffer.add(key, data, offset);
+                iterate(false, false, (key, data, offset) -> {
+                    tmpBuffer.add(key, data, offset);
 
-                if (buffer.isFull()) {
-                    flushNext(out, buffer);
+                    if (tmpBuffer.isFull()) {
+                        flushNext(out, tmpBuffer);
+                    }
+                });
+
+                if (tmpBuffer.isDirty()) {
+                    flushNext(out, tmpBuffer);
                 }
-            });
-
-            if (buffer.isDirty()) {
-                flushNext(out, buffer);
             }
-            out.close();
 
-            File walFileToDelete = new File(dbDirFile.getAbsolutePath() + "/" +
+            File walFileToDelete = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
                     FILE_NAME_WAL + FILE_TYPE_DELETE);
-            File dataFileToDelete = new File(dbDirFile.getAbsolutePath() + "/" +
+            File dataFileToDelete = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
                     FILE_NAME_DATA + FILE_TYPE_DELETE);
 
             try {
                 rwLock.writeLock().lock();
 
                 // First rename prevWalFile and prevDataFile so that .next can be renamed
-                walFile.renameTo(walFileToDelete);
-                dataFile.renameTo(dataFileToDelete);
+                rename(walFile, walFileToDelete);
+                rename(dataFile, dataFileToDelete);
 
                 // Now make bitsets point right.
                 dataInWalFile = dataInNextWalFile;
@@ -304,29 +310,26 @@ public class StormDB {
 
                 // Create new file references for Thread locals to be aware of.
                 // Rename *.next to *.current
-                walFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_WAL);
-                nextWalFile.renameTo(walFile);
+                walFile = new File(
+                        dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_WAL);
+                rename(nextWalFile, walFile);
                 nextWalFile = null;
-                dataFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_DATA);
-                nextDataFile.renameTo(dataFile);
+                dataFile = new File(
+                        dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA);
+                rename(nextDataFile, dataFile);
                 nextDataFile = null;
-
             } finally {
                 rwLock.writeLock().unlock();
             }
 
             // 4. Delete old data and wal
-            if (walFileToDelete.exists()) {
-                if (!walFileToDelete.delete()) {
-                    // TODO: 09/07/20 log error
-                    LOG.warning("Unable to delete file - " + walFileToDelete.getName());
-                }
+            if (walFileToDelete.exists() && !Files.deleteIfExists(walFileToDelete.toPath())) {
+                // TODO: 09/07/20 log error
+                LOG.error("Unable to delete file {}", walFileToDelete.getName());
             }
-            if (dataFileToDelete.exists()) {
-                if (!dataFileToDelete.delete()) {
-                    // TODO: 09/07/20 log error
-                    LOG.warning("Unable to delete file - " + dataFileToDelete.getName());
-                }
+            if (dataFileToDelete.exists() && !Files.deleteIfExists(dataFileToDelete.toPath())) {
+                // TODO: 09/07/20 log error
+                LOG.warn("Unable to delete file {}", dataFileToDelete.getName());
             }
             LOG.info("Finished compaction.");
         }
@@ -499,7 +502,7 @@ public class StormDB {
         try {
             recordIndex = index.get(key);
             if (recordIndex == NO_MAPPING_FOUND) { // No mapping value.
-                return null;
+                return null; // NOSONAR - returning null is a part of the interface.
             }
 
             value = new byte[valueSize];
@@ -569,35 +572,38 @@ public class StormDB {
         if (!dataFile.exists()) {
             return;
         }
-        final BufferedInputStream bufIn = new BufferedInputStream(new FileInputStream(dataFile));
-        final DataInputStream in = new DataInputStream(bufIn);
 
         final ByteBuffer buf = ByteBuffer.allocate(blockSize);
 
         int recordIndex = 0;
 
-        while (true) {
-            buf.clear();
+        try (final BufferedInputStream bufIn = new BufferedInputStream(
+                new FileInputStream(dataFile));
+                final DataInputStream in = new DataInputStream(bufIn)) {
 
-            final int limit = in.read(buf.array());
-            if (limit == -1) {
-                break;
-            }
-            buf.limit(limit);
+            while (true) {
+                buf.clear();
 
-            while (buf.remaining() >= recordSize) {
-                // TODO: 07/07/2020 assert alignment
-                // TODO: 10/07/2020 verify crc32 checksum
-                // TODO: 10/07/2020 verify sync marker
-                // TODO: 10/07/2020 support auto recovery
-                final int key = buf.getInt();
-                buf.position(buf.position() + valueSize);
-                index.put(key, recordIndex);
-                if (walContext) {
-                    dataInWalFile.set(key);
+                final int limit = in.read(buf.array());
+                if (limit == -1) {
+                    break;
                 }
+                buf.limit(limit);
 
-                recordIndex++;
+                while (buf.remaining() >= recordSize) {
+                    // TODO: 07/07/2020 assert alignment
+                    // TODO: 10/07/2020 verify crc32 checksum
+                    // TODO: 10/07/2020 verify sync marker
+                    // TODO: 10/07/2020 support auto recovery
+                    final int key = buf.getInt();
+                    buf.position(buf.position() + valueSize);
+                    index.put(key, recordIndex);
+                    if (walContext) {
+                        dataInWalFile.set(key);
+                    }
+
+                    recordIndex++;
+                }
             }
         }
     }
@@ -605,9 +611,9 @@ public class StormDB {
     public void close() throws IOException, InterruptedException {
         flush();
         shutDown = true;
-        if(this.autoCompact) {
+        if (this.autoCompact) {
             synchronized (compactionSync) {
-                compactionSync.notify();
+                compactionSync.notifyAll();
             }
             tCompaction.join();
         }

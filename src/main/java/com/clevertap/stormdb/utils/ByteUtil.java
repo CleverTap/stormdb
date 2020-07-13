@@ -5,6 +5,9 @@ package com.clevertap.stormdb.utils;
  */
 public class ByteUtil {
 
+    private ByteUtil() {
+    }
+
     /**
      * Translates 4 bytes from the given byte array into an integer.
      *
@@ -16,6 +19,6 @@ public class ByteUtil {
         return data[offset] << 24
                 | ((data[offset + 1] & 0xFF) << 16)
                 | ((data[offset + 2] & 0xFF) << 8)
-                | ((data[offset + 3] & 0xFF));
+                | data[offset + 3] & 0xFF;
     }
 }
