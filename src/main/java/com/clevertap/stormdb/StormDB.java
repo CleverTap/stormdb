@@ -224,7 +224,7 @@ public class StormDB {
     }
 
     private void rename(final File file, final File destination) throws IOException {
-        if (!file.renameTo(destination)) {
+        if (file.exists() && !file.renameTo(destination)) {
             throw new IOException("Failed to rename " + file.getAbsolutePath()
                     + " to " + destination.getAbsolutePath());
         }
