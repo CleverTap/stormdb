@@ -5,21 +5,25 @@ import static com.clevertap.stormdb.StormDB.KEY_SIZE;
 import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
 import static com.clevertap.stormdb.StormDB.RESERVED_KEY_MARKER;
 
+import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
 import com.clevertap.stormdb.utils.RecordUtil;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Enumeration;
+import java.util.function.Consumer;
 import java.util.zip.CRC32;
 
 /**
- * The {@link WriteBuffer} is a logical extension of the WAL file. For a random get, if the index
+ * The {@link Buffer} is a logical extension of the WAL file. For a random get, if the index
  * points to an offset greater than that of the actual WAL file, then it's assumed to be in the
  * write buffer.
  */
-public class WriteBuffer {
+public class Buffer {
 
     protected static final int FOUR_MB = 4 * 1024 * 1024;
 
@@ -34,6 +38,7 @@ public class WriteBuffer {
     private ByteBuffer buffer;
     private final int valueSize;
     private final int recordSize;
+    private final boolean readOnly;
     private final int maxRecords;
 
     /**
@@ -49,9 +54,11 @@ public class WriteBuffer {
      *
      * @param valueSize The size of each value in this database
      */
-    public WriteBuffer(final int valueSize) throws ValueSizeTooLargeException {
+    public Buffer(final int valueSize, final boolean readOnly)
+            throws ValueSizeTooLargeException {
         this.valueSize = valueSize;
         this.recordSize = valueSize + KEY_SIZE;
+        this.readOnly = readOnly;
         if (valueSize > MAX_VALUE_SIZE) {
             throw new ValueSizeTooLargeException();
         }
@@ -71,6 +78,10 @@ public class WriteBuffer {
         buffer = ByteBuffer.allocate(writeBufferSize);
     }
 
+    public Buffer(final int valueSize) throws ValueSizeTooLargeException {
+        this(valueSize, false);
+    }
+
     public int getMaxRecords() {
         return maxRecords;
     }
@@ -80,6 +91,10 @@ public class WriteBuffer {
     }
 
     public int flush(final OutputStream out) throws IOException {
+        if (readOnly) {
+            throw new StormDBRuntimeException("Initialised in read only mode!");
+        }
+
         if (buffer.position() == 0) {
             return 0;
         }
@@ -98,6 +113,38 @@ public class WriteBuffer {
         return bytes;
     }
 
+    public void readFromFiles(ArrayList<RandomAccessFile> files,
+            final Consumer<ByteBuffer> recordConsumer) throws IOException {
+        for (RandomAccessFile file : files) {
+            readFromFile(file, recordConsumer);
+        }
+    }
+
+    public void readFromFile(final RandomAccessFile file, final Consumer<ByteBuffer> recordConsumer)
+            throws IOException {
+        final int blockSize = RecordUtil.blockSizeWithTrailer(recordSize);
+        while (file.getFilePointer() != 0) {
+            buffer.clear();
+
+            final long validBytesRemaining = file.getFilePointer() - blockSize;
+            file.seek(Math.max(validBytesRemaining, 0));
+
+            final int bytesRead = file.read(buffer.array());
+
+            buffer.limit(bytesRead);
+
+            // Set the position again, since the read op moved the cursor ahead.
+            file.seek(Math.max(validBytesRemaining, 0));
+
+            // Note: There's the possibility that we'll read the head of the file twice,
+            // but that's okay, since we iterate in a backwards fashion.
+            final Enumeration<ByteBuffer> iterator = iterator();
+            while (iterator.hasMoreElements()) {
+                recordConsumer.accept(iterator.nextElement());
+            }
+        }
+    }
+
     public byte[] array() {
         return buffer.array();
     }
@@ -111,6 +158,9 @@ public class WriteBuffer {
     }
 
     public int add(int key, byte[] value, int valueOffset) {
+        if (readOnly) {
+            throw new StormDBRuntimeException("Initialised in read only mode!");
+        }
         final int address = buffer.position();
         buffer.putInt(key);
         buffer.put(value, valueOffset, valueSize);

@@ -8,9 +8,13 @@ import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
  */
 public class RecordUtil {
 
+    public static int blockSizeWithTrailer(final int recordSize) {
+        return recordSize * RECORDS_PER_BLOCK + CRC_SIZE + recordSize;
+    }
+
     public static long indexToAddress(final int recordSize, final int recordIndex,
             final boolean wal) {
-        final int blockSize = RECORDS_PER_BLOCK * recordSize + CRC_SIZE + recordSize;
+        final int blockSize = blockSizeWithTrailer(recordSize);
         final int blocksBefore = recordIndex / RECORDS_PER_BLOCK;
         long address = (long) blocksBefore * blockSize
                 + (recordIndex % RECORDS_PER_BLOCK) * recordSize;
@@ -31,7 +35,7 @@ public class RecordUtil {
      * @return An index for addressing this record
      */
     public static int addressToIndex(final int recordSize, final long address, boolean wal) {
-        final int blockSize = RECORDS_PER_BLOCK * recordSize + CRC_SIZE + recordSize;
+        final int blockSize = blockSizeWithTrailer(recordSize);
         final int blocksBefore = (int) (address / blockSize);
         int recordInCurrentBlock = (int) ((address % blockSize) / recordSize);
         if (!wal) {

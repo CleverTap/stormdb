@@ -27,33 +27,33 @@ import org.junit.jupiter.params.provider.ValueSource;
 /**
  * Created by Jude Pereira, at 17:52 on 09/07/2020.
  */
-class WriteBufferTest {
+class BufferTest {
 
     @Test
     void checkWriteBufferSize() throws ValueSizeTooLargeException {
         // Small values.
-        assertEquals(4235400, new WriteBuffer(10).getWriteBufferSize());
-        assertEquals(4252897, new WriteBuffer(1).getWriteBufferSize());
-        assertEquals(4229316, new WriteBuffer(36).getWriteBufferSize());
-        assertEquals(4111096, new WriteBuffer(1024).getWriteBufferSize());
+        assertEquals(4235400, new Buffer(10).getWriteBufferSize());
+        assertEquals(4252897, new Buffer(1).getWriteBufferSize());
+        assertEquals(4229316, new Buffer(36).getWriteBufferSize());
+        assertEquals(4111096, new Buffer(1024).getWriteBufferSize());
 
         // Large values have a consequence in memory management.
-        assertEquals(2114056, new WriteBuffer(16 * 1024).getWriteBufferSize());
-        assertEquals(16908808, new WriteBuffer(128 * 1024).getWriteBufferSize());
-        assertEquals(33817096, new WriteBuffer(256 * 1024).getWriteBufferSize());
-        assertEquals(67633672, new WriteBuffer(512 * 1024).getWriteBufferSize());
+        assertEquals(2114056, new Buffer(16 * 1024).getWriteBufferSize());
+        assertEquals(16908808, new Buffer(128 * 1024).getWriteBufferSize());
+        assertEquals(33817096, new Buffer(256 * 1024).getWriteBufferSize());
+        assertEquals(67633672, new Buffer(512 * 1024).getWriteBufferSize());
     }
 
     @Test
     void checkWriteBufferSizeTooLarge() {
-        assertThrows(ValueSizeTooLargeException.class, () -> new WriteBuffer(512 * 1024 + 1));
+        assertThrows(ValueSizeTooLargeException.class, () -> new Buffer(512 * 1024 + 1));
     }
 
     @Test
     void verifyIncompleteBlockPadding() throws ValueSizeTooLargeException, IOException {
         final AtomicInteger recordsAdded = new AtomicInteger();
         final AtomicInteger syncMarkersAdded = new AtomicInteger();
-        final WriteBuffer buffer = new WriteBuffer(100) {
+        final Buffer buffer = new Buffer(100) {
             @Override
             public int add(int key, byte[] value, int valueOffset) {
                 if (key == StormDB.RESERVED_KEY_MARKER) {
@@ -80,7 +80,7 @@ class WriteBufferTest {
 
     @Test
     void verifyBlockTrailer() throws ValueSizeTooLargeException, IOException {
-        final WriteBuffer buffer = new WriteBuffer(100);
+        final Buffer buffer = new Buffer(100);
         final CRC32 crc32 = new CRC32();
 
         for (int i = 0; i < RECORDS_PER_BLOCK; i++) {
@@ -119,7 +119,7 @@ class WriteBufferTest {
 
     @Test
     void verifyDirty() throws ValueSizeTooLargeException {
-        final WriteBuffer buf = new WriteBuffer(100);
+        final Buffer buf = new Buffer(100);
         assertFalse(buf.isDirty());
         buf.add(10, new byte[100], 0);
         assertTrue(buf.isDirty());
@@ -127,13 +127,13 @@ class WriteBufferTest {
 
     @Test
     void verifyArrayNotNull() throws ValueSizeTooLargeException {
-        final WriteBuffer buf = new WriteBuffer(100);
+        final Buffer buf = new Buffer(100);
         assertNotNull(buf.array());
     }
 
     @Test
     void verifyEmptyFlush() throws ValueSizeTooLargeException, IOException {
-        final WriteBuffer buf = new WriteBuffer(100);
+        final Buffer buf = new Buffer(100);
         final ByteOutputStream out = new ByteOutputStream();
         assertEquals(0, buf.flush(out));
         assertEquals(0, out.getCount());
@@ -141,7 +141,7 @@ class WriteBufferTest {
 
     @Test
     void verifyFull() throws ValueSizeTooLargeException {
-        final WriteBuffer buf = new WriteBuffer(100);
+        final Buffer buf = new Buffer(100);
         assertFalse(buf.isFull());
 
         for (int i = 0; i < buf.getMaxRecords(); i++) {
@@ -158,21 +158,21 @@ class WriteBufferTest {
             RECORDS_PER_BLOCK + 1,
             100, 1000, 10_000, 100_000, 200_000, 349_440})
     void iterator(final int records) throws ValueSizeTooLargeException {
-        final WriteBuffer writeBuffer = new WriteBuffer(8);
+        final Buffer buffer = new Buffer(8);
 
         // Add N records.
         for (int i = 0; i < records; i++) {
-            if (writeBuffer.isFull()) {
+            if (buffer.isFull()) {
                 throw new AssertionError(
                         "Too many values for test case! Requested: " + records + ", but only "
-                                + writeBuffer.getMaxRecords() + " are possible!");
+                                + buffer.getMaxRecords() + " are possible!");
             }
             final ByteBuffer value = ByteBuffer.allocate(8);
             value.putLong((long) i * Integer.MAX_VALUE + 1);
-            writeBuffer.add(i, value.array(), 0);
+            buffer.add(i, value.array(), 0);
         }
 
-        final Enumeration<ByteBuffer> iterator = writeBuffer.iterator();
+        final Enumeration<ByteBuffer> iterator = buffer.iterator();
 
         assertEquals(records > 0, iterator.hasMoreElements());
         final ArrayList<Integer> keysReceivedOrder = new ArrayList<>();

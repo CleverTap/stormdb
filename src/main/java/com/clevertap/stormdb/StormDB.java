@@ -3,6 +3,8 @@ package com.clevertap.stormdb;
 import com.clevertap.stormdb.exceptions.InconsistentDataException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import com.clevertap.stormdb.exceptions.StormDBException;
+import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
+import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
 import com.clevertap.stormdb.utils.ByteUtil;
 import com.clevertap.stormdb.utils.RecordUtil;
 import gnu.trove.map.hash.TIntIntHashMap;
@@ -20,7 +22,6 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Enumeration;
-import java.util.List;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
@@ -83,7 +84,7 @@ public class StormDB {
      */
     private final int blockSize;
 
-    private final WriteBuffer writeBuffer;
+    private final Buffer buffer;
 
     private final int valueSize;
     private final int recordSize;
@@ -104,7 +105,7 @@ public class StormDB {
     private final Object compactionLock = new Object();
     private boolean shutDown = false;
 
-    private static final Logger logger = Logger.getLogger("StormDB");
+    private static final Logger LOG = Logger.getLogger(StormDB.class.getSimpleName());
 
     public StormDB(int valueSize, String dbDir) throws IOException, StormDBException {
         this(valueSize, dbDir, true);
@@ -120,7 +121,7 @@ public class StormDB {
         recordSize = valueSize + KEY_SIZE;
 
         blockSize = (4096 / recordSize) * recordSize;
-        writeBuffer = new WriteBuffer(valueSize);
+        buffer = new Buffer(valueSize);
 
         dataFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_DATA);
         walFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_WAL);
@@ -238,7 +239,7 @@ public class StormDB {
                 flush();
 
                 // TODO: 10/07/2020 revise message
-                logger.info("Starting compaction. CurrentWriteWalOffset = " + bytesInWalFile);
+                LOG.info("Starting compaction. CurrentWriteWalOffset = " + bytesInWalFile);
                 // Check whether there was any data coming in. If not simply bail out.
                 if (bytesInWalFile == 0) {
                     return;
@@ -317,16 +318,16 @@ public class StormDB {
             if (walFileToDelete.exists()) {
                 if (!walFileToDelete.delete()) {
                     // TODO: 09/07/20 log error
-                    logger.warning("Unable to delete file - " + walFileToDelete.getName());
+                    LOG.warning("Unable to delete file - " + walFileToDelete.getName());
                 }
             }
             if (dataFileToDelete.exists()) {
                 if (!dataFileToDelete.delete()) {
                     // TODO: 09/07/20 log error
-                    logger.warning("Unable to delete file - " + dataFileToDelete.getName());
+                    LOG.warning("Unable to delete file - " + dataFileToDelete.getName());
                 }
             }
-            logger.info("Finished compaction.");
+            LOG.info("Finished compaction.");
         }
     }
 
@@ -373,13 +374,13 @@ public class StormDB {
             // TODO: 07/07/2020 Optimisation: if the current key is in the write buffer,
             // TODO: 07/07/2020 don't append, but perform an inplace update
 
-            if (writeBuffer.isFull()) {
+            if (buffer.isFull()) {
                 flush();
                 // TODO: 13/07/20 Make a sync.notify call for compaction if needed.
             }
 
             // Write to the write buffer.
-            final int addressInBuffer = writeBuffer.add(key, value, valueOffset);
+            final int addressInBuffer = buffer.add(key, value, valueOffset);
 
             final int address = RecordUtil.addressToIndex(recordSize,
                     bytesInWalFile + addressInBuffer, true);
@@ -396,16 +397,15 @@ public class StormDB {
         }
     }
 
-
     private void flush() throws IOException {
         rwLock.writeLock().lock();
         try {
             // walOut is initialised on the first write to the writeBuffer.
-            if (walOut == null || !writeBuffer.isDirty()) {
+            if (walOut == null || !buffer.isDirty()) {
                 return;
             }
 
-            bytesInWalFile += writeBuffer.flush(walOut);
+            bytesInWalFile += buffer.flush(walOut);
         } finally {
             rwLock.writeLock().unlock();
         }
@@ -417,14 +417,16 @@ public class StormDB {
 
     private void iterate(final boolean useLatestWalFile, final boolean readInMemoryBuffer,
             final EntryConsumer consumer) throws IOException {
-        List<RandomAccessFile> files = new ArrayList<>(3);
+        final ArrayList<RandomAccessFile> walFiles = new ArrayList<>(2);
+        final ArrayList<RandomAccessFile> dataFiles = new ArrayList<>(1);
+
         Enumeration<ByteBuffer> inMemRecords = null;
         rwLock.readLock().lock();
         try {
             if (nextWalFile != null && useLatestWalFile) {
                 RandomAccessFile reader = getReadRandomAccessFile(walNextReader, nextWalFile);
                 reader.seek(reader.length());
-                files.add(reader);
+                walFiles.add(reader);
             }
 
             // TODO: 05/07/2020 Keep a mem buffer since a block needs to be flushed fully for backwards iteration.
@@ -433,37 +435,30 @@ public class StormDB {
             if (walFile.exists()) {
                 RandomAccessFile reader = getReadRandomAccessFile(walReader, walFile);
                 reader.seek(walFile.length());
-                files.add(reader);
+                walFiles.add(reader);
             }
 
             if (dataFile.exists()) {
                 RandomAccessFile reader = getReadRandomAccessFile(walReader, dataFile);
-                reader.seek(dataFile.length());
-                files.add(reader);
+                dataFiles.add(reader);
             }
 
             if (readInMemoryBuffer) {
-                inMemRecords = writeBuffer.iterator();
+                inMemRecords = buffer.iterator();
             }
         } finally {
             rwLock.readLock().unlock();
         }
 
-        // Always 4 MB, regardless of the value of this.blockSize. Since RandomAccessFile cannot
-        // be buffered, we must make a large get request to the underlying native calls.
-        final int blockSize = (FOUR_MB / recordSize) * recordSize;
-
-        final ByteBuffer buf = ByteBuffer.allocate(blockSize);
-
         final BitSet keysRead = new BitSet(index.size());
 
         final Consumer<ByteBuffer> entryConsumer = entry -> {
-            final int key = buf.getInt();
+            final int key = entry.getInt();
             // TODO: 08/07/2020 if we need to support the whole range of 4 billion keys, we should use a long as the bitset is +ve
             final boolean b = keysRead.get(key);
             if (!b) {
                 try {
-                    consumer.accept(key, buf.array(), buf.position());
+                    consumer.accept(key, entry.array(), entry.position());
                 } catch (IOException e) {
                     // TODO: 13/07/20 Throw custom exception instead.
                 }
@@ -471,50 +466,31 @@ public class StormDB {
             }
         };
 
-        final Consumer<Integer> consumeBufferReverse = (bytesRead) -> {
-            buf.limit(bytesRead);
-            // TODO: 05/07/2020 assert that this is in perfect alignment of 1 KV pair
-            buf.position(buf.limit());
-
-            while (buf.position() != 0) {
-                final int originalPosition = buf.position();
-                buf.position(originalPosition - recordSize);
-                entryConsumer.accept(buf);
-                buf.position(originalPosition);
-            }
-        };
-
         if (readInMemoryBuffer) {
             while (inMemRecords.hasMoreElements()) {
                 final ByteBuffer entry = inMemRecords.nextElement();
                 entryConsumer.accept(entry);
-
             }
         }
 
+        final Buffer reader;
+        try {
+            reader = new Buffer(valueSize, true);
+        } catch (ValueSizeTooLargeException e) {
+            // This will never really happen, since we've already created the DB.
+            throw new StormDBRuntimeException(e);
+        }
+
+        reader.readFromFiles(walFiles, entryConsumer);
         // TODO: 09/07/20 Handle incomplete writes to disk while iteration. Needed esp. while recovery.
-        for (RandomAccessFile file : files) {
-            while (file.getFilePointer() != 0) {
-                buf.clear();
 
-                final long validBytesRemaining = file.getFilePointer() - blockSize;
-                file.seek(Math.max(validBytesRemaining, 0));
-
-                final int bytesRead = file.read(buf.array());
-
-                // Set the position again, since the read op moved the cursor back ahead.
-                file.seek(Math.max(validBytesRemaining, 0));
-
-                // Note: There's the possibility that we'll read the head of the file twice,
-                // but that's okay, since we iterate in a backwards fashion.
-                consumeBufferReverse.accept(bytesRead);
-            }
-        }
+        // TODO: 13/07/2020 send context of data (wal vs data)
+        reader.readFromFiles(dataFiles, entryConsumer);
     }
 
     public byte[] randomGet(final int key) throws IOException, StormDBException {
         int recordIndex;
-        RandomAccessFile f;
+        final RandomAccessFile f;
         byte[] value;
         rwLock.readLock().lock();
         final long address;
@@ -529,7 +505,7 @@ public class StormDB {
                     || dataInWalFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex, true);
                 if (address >= bytesInWalFile) {
-                    System.arraycopy(writeBuffer.array(),
+                    System.arraycopy(buffer.array(),
                             (int) (address - bytesInWalFile) + KEY_SIZE, value, 0, valueSize);
                     return value;
                 }
@@ -583,6 +559,7 @@ public class StormDB {
      * Both files are iterated over sequentially.
      */
     private void buildIndex(final boolean walContext) throws IOException {
+        // TODO: 13/07/2020 migrate to the new walReader
         final File dataFile = walContext ? this.walFile : this.dataFile;
         if (!dataFile.exists()) {
             return;
