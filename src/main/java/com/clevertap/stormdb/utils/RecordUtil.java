@@ -23,15 +23,12 @@ public class RecordUtil {
     }
 
     /**
-     * Given an address, it translates it to a global record offset.
-     * <p>
-     * This global record offset is the same irrespective of the context (i.e. WAL or data),
-     * however, it's required to know the context when translating it back to an address.
+     * Given an address, it translates it to a record index.
      * <p>
      * See {@link #indexToAddress(int, int, boolean)}.
      *
      * @param address The absolute record address
-     * @return An offset for addressing this record
+     * @return An index for addressing this record
      */
     public static int addressToIndex(final int recordSize, final long address, boolean wal) {
         final int blockSize = RECORDS_PER_BLOCK * recordSize + CRC_SIZE + recordSize;
