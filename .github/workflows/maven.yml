@@ -44,7 +44,7 @@ jobs:
           ${{ runner.os }}-sonar-
 
     - name: Run Sonar
-      run: mvn --file pom.xml verify sonar:sonar
+      run: mvn --file pom.xml -P jacoco verify sonar:sonar
       env:
         SONAR_LOGIN_TOKEN: ${{ secrets.SONAR_LOGIN_TOKEN }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
