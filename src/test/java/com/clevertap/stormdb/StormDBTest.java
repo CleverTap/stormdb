@@ -114,13 +114,13 @@ class StormDBTest {
     }
 
     @Test
-    void testMultiThreaded() throws IOException, InterruptedException {
+    void testMultiThreaded() throws IOException, InterruptedException, StormDBException {
         final Path path = Files.createTempDirectory("stormdb");
 
         final int valueSize = 8;
         final StormDB db = new StormDB(valueSize, path.toString(), false);
 
-        final int totalRecords = 1000_000;
+        final int totalRecords = 1_000_000;
         final int maxSleepMs = 100;
         int timeToRunInSeconds = 10;
         long[] kvCache = new long[totalRecords];

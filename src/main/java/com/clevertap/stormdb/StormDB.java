@@ -3,12 +3,11 @@ package com.clevertap.stormdb;
 import com.clevertap.stormdb.exceptions.InconsistentDataException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import com.clevertap.stormdb.exceptions.StormDBException;
-import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
-import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
 import com.clevertap.stormdb.utils.ByteUtil;
 import com.clevertap.stormdb.utils.RecordUtil;
 import gnu.trove.map.hash.TIntIntHashMap;
 import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
@@ -121,7 +120,7 @@ public class StormDB {
         recordSize = valueSize + KEY_SIZE;
 
         blockSize = (4096 / recordSize) * recordSize;
-        buffer = new Buffer(valueSize);
+        buffer = new Buffer(valueSize, false, true);
 
         dataFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_DATA);
         walFile = new File(dbDirFile.getAbsolutePath() + "/" + FILE_NAME_WAL);
@@ -234,7 +233,7 @@ public class StormDB {
                 rwLock.writeLock().lock();
 
                 // First flush all data.
-                // This is because we will be resetting writeOffsetWal below and we need to get all
+                // This is because we will be resetting bytesInWalFile below and we need to get all
                 // buffer to file so that their offsets are honoured.
                 flush();
 
@@ -266,23 +265,25 @@ public class StormDB {
             // 3. Process data.current file.
             nextDataFile = new File(dbDirFile.getAbsolutePath() + "/" +
                     FILE_NAME_DATA + FILE_TYPE_NEXT);
-            DataOutputStream nextDataOut = new DataOutputStream(
-                    new FileOutputStream(nextDataFile));
-            ByteBuffer nextWriteBuffer = ByteBuffer.allocate((FOUR_MB / recordSize) * recordSize);
-            final int[] nextFileOffset = {0};
-            iterate(false, false, (key, data, offset) -> {
-                nextWriteBuffer.putInt(key);
-                nextWriteBuffer.put(data, offset, valueSize);
 
-                // Optimize batched writes and updates to structures for lesser contention
-                if (nextWriteBuffer.remaining() == 0) {
-                    nextFileOffset[0] = flushNext(nextDataOut, nextWriteBuffer, nextFileOffset[0]);
+            final DataOutput out = new DataOutput(
+                    new BufferedOutputStream(new FileOutputStream(nextDataFile),
+                            buffer.getWriteBufferSize()));
+
+            final Buffer buffer = new Buffer(valueSize, false, false);
+
+            iterate(false, false, (key, data, offset) -> {
+                buffer.add(key, data, offset);
+
+                if (buffer.isFull()) {
+                    flushNext(out, buffer);
                 }
             });
-            if (nextWriteBuffer.position() != 0) {
-                nextFileOffset[0] = flushNext(nextDataOut, nextWriteBuffer, nextFileOffset[0]);
+
+            if (buffer.isDirty()) {
+                flushNext(out, buffer);
             }
-            nextDataOut.close();
+            out.close();
 
             File walFileToDelete = new File(dbDirFile.getAbsolutePath() + "/" +
                     FILE_NAME_WAL + FILE_TYPE_DELETE);
@@ -331,28 +332,29 @@ public class StormDB {
         }
     }
 
-    private int flushNext(DataOutputStream nextDataOut, ByteBuffer nextWriteBuffer,
-            int nextFileOffset) throws IOException {
-        nextDataOut.write(nextWriteBuffer.array(), 0, nextWriteBuffer.position());
-        nextDataOut.flush();
+    private void flushNext(DataOutput writer, Buffer buffer) throws IOException {
+        final long bytesWritten = writer.getBytesWritten();
+
+        buffer.flush(writer);
 
         try {
             rwLock.writeLock().lock();
-            for (int i = 0; i < nextWriteBuffer.position(); i += recordSize) {
-                final int key = nextWriteBuffer.getInt(i);
-                if(!dataInNextWalFile.get(key)) {
-                    index.put(key, nextFileOffset);
+            final Enumeration<ByteBuffer> iterator = buffer.iterator();
+
+            while (iterator.hasMoreElements()) {
+                final ByteBuffer byteBuffer = iterator.nextElement();
+                final long address = byteBuffer.position() + bytesWritten;
+                final int key = byteBuffer.getInt();
+                if (!dataInNextWalFile.get(key)) {
+                    index.put(key, RecordUtil.addressToIndex(recordSize, address, false));
                     dataInNextFile.set(key);
                 }
-                nextFileOffset++;
             }
         } finally {
             rwLock.writeLock().unlock();
         }
 
-        nextWriteBuffer.clear();
-
-        return nextFileOffset;
+        buffer.clear();
     }
 
     public void put(final byte[] key, final byte[] value, final int valueOffset)
@@ -410,6 +412,7 @@ public class StormDB {
             }
 
             bytesInWalFile += buffer.flush(walOut);
+            buffer.clear();
         } finally {
             rwLock.writeLock().unlock();
         }
@@ -477,19 +480,14 @@ public class StormDB {
             }
         }
 
-        final Buffer reader;
-        try {
-            reader = new Buffer(valueSize, true);
-        } catch (ValueSizeTooLargeException e) {
-            // This will never really happen, since we've already created the DB.
-            throw new StormDBRuntimeException(e);
-        }
-
-        reader.readFromFiles(walFiles, entryConsumer);
         // TODO: 09/07/20 Handle incomplete writes to disk while iteration. Needed esp. while recovery.
-
         // TODO: 13/07/2020 send context of data (wal vs data)
-        reader.readFromFiles(dataFiles, entryConsumer);
+
+        final Buffer walReader = new Buffer(valueSize, true, true);
+        walReader.readFromFiles(walFiles, entryConsumer);
+
+        final Buffer dataReader = new Buffer(valueSize, true, false);
+        dataReader.readFromFiles(dataFiles, entryConsumer);
     }
 
     public byte[] randomGet(final int key) throws IOException, StormDBException {
@@ -505,30 +503,28 @@ public class StormDB {
             }
 
             value = new byte[valueSize];
-            if (offsetInData >= writeOffsetWal) {
-                boolean foundInMemory;
-                if(dataInNextWalFile != null) {
-                    foundInMemory = dataInNextWalFile.get(key);
-                } else {
-                    foundInMemory = dataInWalFile.get(key);
-                }
-                if (foundInMemory) {
-                    final int offsetInWriteBuffer = (offsetInData - writeOffsetWal) * recordSize;
-                    System.arraycopy(writeBuffer.array(), offsetInWriteBuffer + keySize, value, 0,
-                            valueSize);
-                    return value;
-                }
-            } else {
-                address = RecordUtil.indexToAddress(recordSize, recordIndex, false);
-            }
 
             if (dataInNextWalFile != null && dataInNextWalFile.get(key)) {
+                address = RecordUtil.indexToAddress(recordSize, recordIndex, true);
+                if (address >= bytesInWalFile) {
+                    System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + KEY_SIZE),
+                            value, 0, valueSize);
+                    return value;
+                }
                 f = getReadRandomAccessFile(walNextReader, nextWalFile);
             } else if (dataInNextFile != null && dataInNextFile.get(key)) {
+                address = RecordUtil.indexToAddress(recordSize, recordIndex, false);
                 f = getReadRandomAccessFile(dataNextReader, nextDataFile);
             } else if (dataInWalFile.get(key)) {
+                address = RecordUtil.indexToAddress(recordSize, recordIndex, true);
+                if (address >= bytesInWalFile) {
+                    System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + KEY_SIZE),
+                            value, 0, valueSize);
+                    return value;
+                }
                 f = getReadRandomAccessFile(walReader, walFile);
             } else {
+                address = RecordUtil.indexToAddress(recordSize, recordIndex, false);
                 f = getReadRandomAccessFile(dataReader, dataFile);
             }
         } finally {

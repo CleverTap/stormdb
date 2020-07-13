@@ -39,6 +39,7 @@ public class Buffer {
     private final int valueSize;
     private final int recordSize;
     private final boolean readOnly;
+    private final boolean wal;
     private final int maxRecords;
 
     /**
@@ -54,11 +55,12 @@ public class Buffer {
      *
      * @param valueSize The size of each value in this database
      */
-    public Buffer(final int valueSize, final boolean readOnly)
+    public Buffer(final int valueSize, final boolean readOnly, final boolean wal)
             throws ValueSizeTooLargeException {
         this.valueSize = valueSize;
         this.recordSize = valueSize + KEY_SIZE;
         this.readOnly = readOnly;
+        this.wal = wal;
         if (valueSize > MAX_VALUE_SIZE) {
             throw new ValueSizeTooLargeException();
         }
@@ -76,10 +78,6 @@ public class Buffer {
                 + (blocks * (CRC_SIZE + recordSize));
 
         buffer = ByteBuffer.allocate(writeBufferSize);
-    }
-
-    public Buffer(final int valueSize) throws ValueSizeTooLargeException {
-        this(valueSize, false);
     }
 
     public int getMaxRecords() {
@@ -100,7 +98,7 @@ public class Buffer {
         }
 
         // Fill the block with the last record, if required.
-        while ((RecordUtil.addressToIndex(recordSize, buffer.position(), true))
+        while ((RecordUtil.addressToIndex(recordSize, buffer.position(), wal))
                 % RECORDS_PER_BLOCK != 0) {
             final int key = buffer.getInt(buffer.position() - recordSize);
             add(key, buffer.array(), buffer.position() - recordSize + KEY_SIZE);
@@ -109,7 +107,6 @@ public class Buffer {
         final int bytes = buffer.position();
         out.write(buffer.array(), 0, bytes);
         out.flush();
-        buffer = ByteBuffer.allocate(buffer.capacity());
         return bytes;
     }
 
@@ -123,26 +120,47 @@ public class Buffer {
     public void readFromFile(final RandomAccessFile file, final Consumer<ByteBuffer> recordConsumer)
             throws IOException {
         final int blockSize = RecordUtil.blockSizeWithTrailer(recordSize);
-        while (file.getFilePointer() != 0) {
-            buffer.clear();
 
-            final long validBytesRemaining = file.getFilePointer() - blockSize;
-            file.seek(Math.max(validBytesRemaining, 0));
+        if (wal) {
+            while (file.getFilePointer() != 0) {
+                buffer.clear();
+                final long validBytesRemaining = file.getFilePointer() - blockSize;
+                file.seek(Math.max(validBytesRemaining, 0));
 
-            final int bytesRead = file.read(buffer.array());
+                fillBuffer(file, recordConsumer);
 
-            buffer.limit(bytesRead);
-
-            // Set the position again, since the read op moved the cursor ahead.
-            file.seek(Math.max(validBytesRemaining, 0));
-
-            // Note: There's the possibility that we'll read the head of the file twice,
-            // but that's okay, since we iterate in a backwards fashion.
-            final Enumeration<ByteBuffer> iterator = iterator();
-            while (iterator.hasMoreElements()) {
-                recordConsumer.accept(iterator.nextElement());
+                // Set the position again, since the read op moved the cursor ahead.
+                file.seek(Math.max(validBytesRemaining, 0));
+            }
+        } else {
+            while (true) {
+                buffer.clear();
+                final int bytesRead = fillBuffer(file, recordConsumer);
+                if (bytesRead < blockSize) {
+                    break;
+                }
             }
         }
+        // TODO: 13/07/2020 we cannot use a threadlocal, since in a multi db scenario, we'll keep opening files - use a hashmap instead
+    }
+
+    private int fillBuffer(RandomAccessFile file, Consumer<ByteBuffer> recordConsumer)
+            throws IOException {
+        final int bytesRead = file.read(buffer.array());
+        if (bytesRead == -1) { // No more data.
+            return 0;
+        }
+        buffer.position(bytesRead);
+        buffer.limit(bytesRead);
+
+        // Note: There's the possibility that we'll read the head of the file twice,
+        // but that's okay, since we iterate in a backwards fashion.
+        final Enumeration<ByteBuffer> iterator = iterator();
+        while (iterator.hasMoreElements()) {
+            recordConsumer.accept(iterator.nextElement());
+        }
+
+        return bytesRead;
     }
 
     public byte[] array() {
@@ -162,17 +180,22 @@ public class Buffer {
             throw new StormDBRuntimeException("Initialised in read only mode!");
         }
         final int address = buffer.position();
+
+        if (!wal
+                && (RecordUtil.addressToIndex(recordSize, address, wal) % RECORDS_PER_BLOCK) + 1
+                == 0) {
+            insertSyncMarker();
+        }
+
         buffer.putInt(key);
         buffer.put(value, valueOffset, valueSize);
 
         // Should we close this block?
         // Don't close the block if the we're adding the sync marker kv pair.
-        if (key != RESERVED_KEY_MARKER) {
-            final int nextRecordIndex = RecordUtil.addressToIndex(
-                    recordSize, buffer.position(), true);
-            if (nextRecordIndex % RECORDS_PER_BLOCK == 0) {
-                closeBlock();
-            }
+        final int nextRecordIndex = RecordUtil.addressToIndex(
+                recordSize, buffer.position(), wal);
+        if (nextRecordIndex % RECORDS_PER_BLOCK == 0) {
+            closeBlock();
         }
         return address;
     }
@@ -182,22 +205,33 @@ public class Buffer {
      * current buffer.
      */
     public Enumeration<ByteBuffer> iterator() {
-        final ByteBuffer ourBuffer = buffer.asReadOnlyBuffer();
+        final ByteBuffer ourBuffer = buffer.duplicate();
 
-        final int recordsToRead = RecordUtil.addressToIndex(recordSize, buffer.position(), true);
+        final int recordsToRead = RecordUtil.addressToIndex(recordSize, buffer.position(), wal);
 
         return new Enumeration<ByteBuffer>() {
-            int remainingRecords = recordsToRead; // -1 because we work on an index.
+            int currentRecordIndex = wal ? recordsToRead : 0;
 
             @Override
             public boolean hasMoreElements() {
-                return remainingRecords != 0;
+                if (wal) {
+                    return currentRecordIndex != 0;
+                } else {
+                    return currentRecordIndex < recordsToRead;
+                }
             }
 
             @Override
             public ByteBuffer nextElement() {
-                ourBuffer.position(
-                        (int) RecordUtil.indexToAddress(recordSize, --remainingRecords, true));
+                final int position;
+                if (wal) {
+                    position = (int) RecordUtil
+                            .indexToAddress(recordSize, --currentRecordIndex, true);
+                } else {
+                    position = (int) RecordUtil
+                            .indexToAddress(recordSize, currentRecordIndex++, false);
+                }
+                ourBuffer.position(position);
                 return ourBuffer;
             }
         };
@@ -208,8 +242,19 @@ public class Buffer {
         final int blockSize = recordSize * RECORDS_PER_BLOCK;
         crc32.update(buffer.array(), buffer.position() - blockSize, blockSize);
         buffer.putInt((int) crc32.getValue());
-        final byte[] bytes = new byte[recordSize];
+        if (wal) {
+            insertSyncMarker();
+        }
+    }
+
+    protected void insertSyncMarker() {
+        final byte[] bytes = new byte[valueSize];
         Arrays.fill(bytes, (byte) 0xFF);
-        add(StormDB.RESERVED_KEY_MARKER, bytes, 0);
+        buffer.putInt(RESERVED_KEY_MARKER);
+        buffer.put(bytes);
+    }
+
+    public void clear() {
+        buffer = ByteBuffer.allocate(buffer.capacity());
     }
 }
