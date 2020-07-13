@@ -321,8 +321,12 @@ public class StormDB {
         try {
             rwLock.writeLock().lock();
             for (int i = 0; i < nextWriteBuffer.position(); i += recordSize) {
-                index.put(nextWriteBuffer.getInt(i), nextFileOffset++);
-                dataInNextFile.set(nextWriteBuffer.getInt(i));
+                final int key = nextWriteBuffer.getInt(i);
+                if(!dataInNextWalFile.get(key)) {
+                    index.put(key, nextFileOffset);
+                    dataInNextFile.set(key);
+                }
+                nextFileOffset++;
             }
         } finally {
             rwLock.writeLock().unlock();
@@ -497,8 +501,13 @@ public class StormDB {
 
             value = new byte[valueSize];
             if (offsetInData >= writeOffsetWal) {
-                if ((dataInNextWalFile != null && dataInNextWalFile.get(key))
-                        || dataInWalFile.get(key)) {
+                boolean foundInMemory;
+                if(dataInNextWalFile != null) {
+                    foundInMemory = dataInNextWalFile.get(key);
+                } else {
+                    foundInMemory = dataInWalFile.get(key);
+                }
+                if (foundInMemory) {
                     final int offsetInWriteBuffer = (offsetInData - writeOffsetWal) * recordSize;
                     System.arraycopy(writeBuffer.array(), offsetInWriteBuffer + keySize, value, 0,
                             valueSize);

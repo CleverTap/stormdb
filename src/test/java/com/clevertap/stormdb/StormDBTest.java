@@ -1,6 +1,8 @@
 package com.clevertap.stormdb;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -11,6 +13,9 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 
 class StormDBTest {
@@ -20,7 +25,7 @@ class StormDBTest {
         final Path path = Files.createTempDirectory("stormdb");
 
         final int valueSize = 28;
-        final StormDB db = new StormDB(valueSize, path.toString());
+        final StormDB db = new StormDB(valueSize, path.toString(), false);
 
         final int records = 100;
         for (int i = 0; i < records; i++) {
@@ -55,7 +60,7 @@ class StormDBTest {
         final Path path = Files.createTempDirectory("stormdb");
 
         final int valueSize = 8;
-        final StormDB db = new StormDB(valueSize, path.toString());
+        final StormDB db = new StormDB(valueSize, path.toString(), false);
 
         final HashMap<Integer, Long> kvCache = new HashMap<>();
 
@@ -103,6 +108,139 @@ class StormDBTest {
             final byte[] bytes = db.randomGet(i);
             final ByteBuffer value = ByteBuffer.wrap(bytes);
             assertEquals(kvCache.get(i), value.getLong());
+        }
+    }
+
+    @Test
+    void testMultiThreaded() throws IOException, InterruptedException {
+        final Path path = Files.createTempDirectory("stormdb");
+
+        final int valueSize = 8;
+        final StormDB db = new StormDB(valueSize, path.toString(), false);
+
+        final int totalRecords = 1000_000;
+        final int maxSleepMs = 100;
+        int timeToRunInSeconds = 10;
+        long[] kvCache = new long[totalRecords];
+
+        final Boolean[] exceptionThrown = { false };
+        final Boolean[] shutdown = { false };
+        final ExecutorService service = Executors.newFixedThreadPool(4);
+
+        // Writer thread.
+        service.submit(() -> {
+            while(!shutdown[0]) {
+                int iterationNumber = 1;
+                for (int i = 0; i < totalRecords; i++) {
+                    long val = (i % 1000) * iterationNumber;
+                    final ByteBuffer value = ByteBuffer.allocate(valueSize);
+                    value.putLong(val); // Insert a random value.
+                    synchronized (kvCache) {
+                        kvCache[i] = val; // Update cache first.
+                    }
+                    try {
+                        db.put(i, value.array());
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        exceptionThrown[0] = true;
+                    }
+                }
+                sleepRandomMs("writer", maxSleepMs);
+                iterationNumber++;
+            }
+            System.out.println("Finished writer thread.");
+        });
+
+        // Compaction thread
+        service.submit(() -> {
+            while(!shutdown[0]) {
+                try {
+                    db.compact();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    exceptionThrown[0] = true;
+                }
+                sleepRandomMs("compaction", maxSleepMs);
+            }
+            System.out.println("Finished compaction thread.");
+        });
+
+        service.submit(() -> {
+            while(!shutdown[0]) {
+                // Iterate sequentially.
+                try {
+                    db.iterate((key, data, offset) -> {
+                        final ByteBuffer value = ByteBuffer.wrap(data, offset, valueSize);
+                        synchronized (kvCache) {
+                            assertTrue(kvCache[key] >= value.getLong());
+                        }
+                    });
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    exceptionThrown[0] = true;
+                }
+//                sleepRandomMs("iterate", maxSleepMs);
+            }
+            System.out.println("Finished iteration thread.");
+        });
+
+        // Verifier / Reader
+        service.submit(() -> {
+            try {
+                while (!shutdown[0]) {
+                    // Verify.
+//                    System.out.println("VERIFY1=");
+                    for (int i = 0; i < totalRecords; i++) {
+                        final byte[] bytes;
+                        try {
+//                            System.out.println("VERIFY2-" + i);
+                            bytes = db.randomGet(i);
+                            if (bytes == null) {
+                                continue;
+                            }
+                            final ByteBuffer value = ByteBuffer.wrap(bytes);
+                            final long longValue = value.getLong();
+//                            System.out.println("VERIFY3-" + i + " value=" + longValue +
+//                                    " kvCache[i] = " + kvCache[i]);
+                            synchronized (kvCache) {
+//                                if(kvCache[i] < longValue) {
+//                                    System.out.println("Break gound.");
+//                                }
+                                assertTrue(kvCache[i] >= longValue);
+                            }
+//                            System.out.println("VERIFY4-" + i);
+                        } catch (IOException e) {
+                            exceptionThrown[0] = true;
+                            throw e;
+                        }
+                    }
+                    sleepRandomMs("verifier", maxSleepMs);
+                }
+            } catch (Exception e) {
+                exceptionThrown[0] = true;
+                System.out.println("Exception in verifier."+e.getLocalizedMessage());
+                e.printStackTrace();
+            }
+            System.out.println("Finished verification thread.");
+        });
+
+        while(timeToRunInSeconds-- > 0) {
+            Thread.sleep(1000);
+        }
+        shutdown[0] = true;
+        System.out.println("service.awaitTermination for 5 seconds started.");
+        service.shutdown();
+        assertTrue(service.awaitTermination(5, TimeUnit.SECONDS));
+        assertFalse(exceptionThrown[0]);
+    }
+
+    private void sleepRandomMs(String caller, int maxMs) {
+        try {
+            long sleepTime = (long)(maxMs * Math.random());
+            System.out.println("Sleeping "+caller+" for "+sleepTime+" ms.");
+            Thread.sleep(sleepTime);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
     }
 
