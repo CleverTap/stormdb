@@ -1,5 +1,6 @@
 package com.clevertap.stormdb;
 
+import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -13,11 +14,15 @@ import com.sun.xml.internal.messaging.saaj.util.ByteOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Enumeration;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * Created by Jude Pereira, at 17:52 on 09/07/2020.
@@ -78,7 +83,7 @@ class WriteBufferTest {
         final WriteBuffer buffer = new WriteBuffer(100);
         final CRC32 crc32 = new CRC32();
 
-        for (int i = 0; i < StormDB.RECORDS_PER_BLOCK; i++) {
+        for (int i = 0; i < RECORDS_PER_BLOCK; i++) {
             final byte[] value = new byte[100];
             ThreadLocalRandom.current().nextBytes(value);
             crc32.update(i >> 24);
@@ -96,7 +101,7 @@ class WriteBufferTest {
 
 
         // Verify CRC32 checksum.
-        bytesWritten.position(StormDB.RECORDS_PER_BLOCK * 104);
+        bytesWritten.position(RECORDS_PER_BLOCK * 104);
         assertNotEquals(0, crc32.getValue());
         assertEquals((int) crc32.getValue(), bytesWritten.getInt());
 
@@ -144,5 +149,49 @@ class WriteBufferTest {
         }
 
         assertTrue(buf.isFull());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1,
+            RECORDS_PER_BLOCK - 1,
+            RECORDS_PER_BLOCK,
+            RECORDS_PER_BLOCK + 1,
+            100, 1000, 10_000, 100_000, 200_000, 349_440})
+    void iterator(final int records) throws ValueSizeTooLargeException {
+        final WriteBuffer writeBuffer = new WriteBuffer(8);
+
+        // Add N records.
+        for (int i = 0; i < records; i++) {
+            if (writeBuffer.isFull()) {
+                throw new AssertionError(
+                        "Too many values for test case! Requested: " + records + ", but only "
+                                + writeBuffer.getMaxRecords() + " are possible!");
+            }
+            final ByteBuffer value = ByteBuffer.allocate(8);
+            value.putLong((long) i * Integer.MAX_VALUE + 1);
+            writeBuffer.add(i, value.array(), 0);
+        }
+
+        final Enumeration<ByteBuffer> iterator = writeBuffer.iterator();
+
+        assertEquals(records > 0, iterator.hasMoreElements());
+        final ArrayList<Integer> keysReceivedOrder = new ArrayList<>();
+        while (iterator.hasMoreElements()) {
+            final ByteBuffer byteBuffer = iterator.nextElement();
+            final int key = byteBuffer.getInt();
+            final long value = byteBuffer.getLong();
+            assertEquals((long) key * Integer.MAX_VALUE + 1, value);
+            keysReceivedOrder.add(key);
+        }
+
+        assertEquals(records, keysReceivedOrder.size());
+
+        final ArrayList<Integer> expectedKeysReceivedOrder = new ArrayList<>();
+
+        for (int i = records - 1; i >= 0; i--) {
+            expectedKeysReceivedOrder.add(i);
+        }
+
+        assertArrayEquals(expectedKeysReceivedOrder.toArray(), keysReceivedOrder.toArray());
     }
 }

@@ -19,6 +19,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.Enumeration;
 import java.util.List;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
@@ -104,6 +105,10 @@ public class StormDB {
     private boolean shutDown = false;
 
     private static final Logger logger = Logger.getLogger("StormDB");
+
+    public StormDB(int valueSize, String dbDir) throws IOException, StormDBException {
+        this(valueSize, dbDir, true);
+    }
 
     public StormDB(final int valueSize, final String dbDir, final boolean autoCompact) throws IOException, StormDBException {
         this.valueSize = valueSize;
@@ -413,7 +418,7 @@ public class StormDB {
     private void iterate(final boolean useLatestWalFile, final boolean readInMemoryBuffer,
             final EntryConsumer consumer) throws IOException {
         List<RandomAccessFile> files = new ArrayList<>(3);
-        byte[] inMemoryKeyValues = null;
+        Enumeration<ByteBuffer> inMemRecords = null;
         rwLock.readLock().lock();
         try {
             if (nextWalFile != null && useLatestWalFile) {
@@ -437,8 +442,8 @@ public class StormDB {
                 files.add(reader);
             }
 
-            if(readInMemoryBuffer) {
-                inMemoryKeyValues = writeBuffer.array().clone();
+            if (readInMemoryBuffer) {
+                inMemRecords = writeBuffer.iterator();
             }
         } finally {
             rwLock.readLock().unlock();
@@ -452,34 +457,39 @@ public class StormDB {
 
         final BitSet keysRead = new BitSet(index.size());
 
+        final Consumer<ByteBuffer> entryConsumer = entry -> {
+            final int key = buf.getInt();
+            // TODO: 08/07/2020 if we need to support the whole range of 4 billion keys, we should use a long as the bitset is +ve
+            final boolean b = keysRead.get(key);
+            if (!b) {
+                try {
+                    consumer.accept(key, buf.array(), buf.position());
+                } catch (IOException e) {
+                    // TODO: 13/07/20 Throw custom exception instead.
+                }
+                keysRead.set(key);
+            }
+        };
+
         final Consumer<Integer> consumeBufferReverse = (bytesRead) -> {
             buf.limit(bytesRead);
             // TODO: 05/07/2020 assert that this is in perfect alignment of 1 KV pair
             buf.position(buf.limit());
 
             while (buf.position() != 0) {
-                buf.position(buf.position() - recordSize);
-                final int key = buf.getInt();
-                // TODO: 08/07/2020 if we need to support the whole range of 4 billion keys, we should use a long as the bitset is +ve
-                final boolean b = keysRead.get(key);
-                if (!b) {
-                    try {
-                        consumer.accept(key, buf.array(), buf.position());
-                    } catch (IOException e) {
-                        // TODO: 13/07/20 Throw custom exception instead.
-                    }
-                    keysRead.set(key);
-                }
-
-                // Do this again, since we read the buffer backwards too.
-                // -4 because we read the key only.
-                    buf.position(buf.position() - KEY_SIZE);
+                final int originalPosition = buf.position();
+                buf.position(originalPosition - recordSize);
+                entryConsumer.accept(buf);
+                buf.position(originalPosition);
             }
         };
 
-        if(readInMemoryBuffer) {
-            buf.put(inMemoryKeyValues, 0, inMemoryKeyValues.length);
-            consumeBufferReverse.accept(inMemoryKeyValues.length);
+        if (readInMemoryBuffer) {
+            while (inMemRecords.hasMoreElements()) {
+                final ByteBuffer entry = inMemRecords.nextElement();
+                entryConsumer.accept(entry);
+
+            }
         }
 
         // TODO: 09/07/20 Handle incomplete writes to disk while iteration. Needed esp. while recovery.

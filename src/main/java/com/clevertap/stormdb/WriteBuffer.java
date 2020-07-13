@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.Enumeration;
 import java.util.zip.CRC32;
 
 /**
@@ -30,7 +31,7 @@ public class WriteBuffer {
      */
     protected static final int MAX_VALUE_SIZE = 512 * 1024;
 
-    private final ByteBuffer buffer;
+    private ByteBuffer buffer;
     private final int valueSize;
     private final int recordSize;
     private final int maxRecords;
@@ -93,7 +94,7 @@ public class WriteBuffer {
         final int bytes = buffer.position();
         out.write(buffer.array(), 0, bytes);
         out.flush();
-        buffer.clear();
+        buffer = ByteBuffer.allocate(buffer.capacity());
         return bytes;
     }
 
@@ -124,6 +125,32 @@ public class WriteBuffer {
             }
         }
         return address;
+    }
+
+    /**
+     * Always call this from a synchronised context, since it will provide a snapshot of data in the
+     * current buffer.
+     */
+    public Enumeration<ByteBuffer> iterator() {
+        final ByteBuffer ourBuffer = buffer.asReadOnlyBuffer();
+
+        final int recordsToRead = RecordUtil.addressToIndex(recordSize, buffer.position(), true);
+
+        return new Enumeration<ByteBuffer>() {
+            int remainingRecords = recordsToRead; // -1 because we work on an index.
+
+            @Override
+            public boolean hasMoreElements() {
+                return remainingRecords != 0;
+            }
+
+            @Override
+            public ByteBuffer nextElement() {
+                ourBuffer.position(
+                        (int) RecordUtil.indexToAddress(recordSize, --remainingRecords, true));
+                return ourBuffer;
+            }
+        };
     }
 
     private void closeBlock() {
