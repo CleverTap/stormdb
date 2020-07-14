@@ -52,14 +52,24 @@ class BufferTest {
         // TODO: 13/07/2020 add check for verifying that a buffer is set to new after clear
     }
 
-    @Test
-    void verifyIncompleteBlockPadding() throws ValueSizeTooLargeException, IOException {
+    @ParameterizedTest
+    @ValueSource(ints = {1, 8, 100})
+    void verifyIncompleteBlockPadding(final int valueSize)
+            throws ValueSizeTooLargeException, IOException {
+
+        final byte[] expectedValue = new byte[valueSize];
+        ThreadLocalRandom.current().nextBytes(expectedValue);
+
         final AtomicInteger recordsAdded = new AtomicInteger();
         final AtomicInteger syncMarkersAdded = new AtomicInteger();
-        final Buffer buffer = new Buffer(100, false, true) {
+        final Buffer buffer = new Buffer(valueSize, false, true) {
             @Override
             public int add(int key, byte[] value, int valueOffset) {
                 recordsAdded.incrementAndGet();
+                final byte[] actualValue = new byte[valueSize];
+                System.arraycopy(value, valueOffset, actualValue, 0, valueSize);
+                assertArrayEquals(expectedValue, actualValue);
+                assertEquals(28, key);
                 return super.add(key, value, valueOffset);
             }
 
@@ -70,7 +80,7 @@ class BufferTest {
             }
         };
 
-        buffer.add(28, new byte[100], 0);
+        buffer.add(28, expectedValue, 0);
 
         assertEquals(1, recordsAdded.get());
         assertEquals(0, syncMarkersAdded.get());
@@ -78,7 +88,7 @@ class BufferTest {
         buffer.flush(new ByteArrayOutputStream());
 
         // Although we've added just one record, #add should be called
-        // 128 more times, bringing the total records to 129 (+1 for the sync marker).
+        // 127 more times, bringing the total records to 128.
         assertEquals(128, recordsAdded.get());
         assertEquals(1, syncMarkersAdded.get());
     }
