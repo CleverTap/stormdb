@@ -233,6 +233,14 @@ public class StormDB {
         }
     }
 
+    /**
+     * This should always be called from synchronized context.
+     * @return If compaction is in progress
+     */
+    private boolean isCompactionInProgress() {
+        return dataInNextFile != null;
+    }
+
     // TODO: 13/07/20 Handle case where compaction takes too long.
     // TODO: 13/07/20 Handle case where compaction thread keeps failing.
     public void compact() throws IOException {
@@ -398,7 +406,7 @@ public class StormDB {
                     bytesInWalFile + addressInBuffer, true);
             index.put(key, address);
 
-            if (dataInNextWalFile != null) {
+            if (isCompactionInProgress()) {
                 dataInNextWalFile.set(key);
             } else {
                 dataInWalFile.set(key);
@@ -436,7 +444,7 @@ public class StormDB {
         Enumeration<ByteBuffer> inMemRecords = null;
         rwLock.readLock().lock();
         try {
-            if (nextWalFile != null && useLatestWalFile) {
+            if (isCompactionInProgress() && useLatestWalFile) {
                 RandomAccessFile reader = getReadRandomAccessFile(walNextReader, nextWalFile);
                 reader.seek(reader.length());
                 walFiles.add(reader);
@@ -510,7 +518,7 @@ public class StormDB {
 
             value = new byte[valueSize];
 
-            if (dataInNextWalFile != null && dataInNextWalFile.get(key)) {
+            if (isCompactionInProgress() && dataInNextWalFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex, true);
                 if (address >= bytesInWalFile) {
                     System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + KEY_SIZE),
@@ -518,12 +526,13 @@ public class StormDB {
                     return value;
                 }
                 f = getReadRandomAccessFile(walNextReader, nextWalFile);
-            } else if (dataInNextFile != null && dataInNextFile.get(key)) {
+            } else if (isCompactionInProgress() && dataInNextFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex, false);
                 f = getReadRandomAccessFile(dataNextReader, nextDataFile);
             } else if (dataInWalFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex, true);
-                if (address >= bytesInWalFile) {
+                // If compaction is in progress, we can not read in-memory.
+                if (!isCompactionInProgress() && address >= bytesInWalFile) {
                     System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + KEY_SIZE),
                             value, 0, valueSize);
                     return value;

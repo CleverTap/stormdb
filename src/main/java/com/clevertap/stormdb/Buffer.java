@@ -123,7 +123,7 @@ public class Buffer {
         if (wal) {
             while (file.getFilePointer() != 0) {
                 byteBuffer.clear();
-                final long validBytesRemaining = file.getFilePointer() - blockSize;
+                final long validBytesRemaining = file.getFilePointer() - byteBuffer.capacity();
                 file.seek(Math.max(validBytesRemaining, 0));
 
                 fillBuffer(file, recordConsumer);
@@ -180,9 +180,7 @@ public class Buffer {
         }
         final int address = byteBuffer.position();
 
-        if (!wal
-                && (RecordUtil.addressToIndex(recordSize, address, wal) % RECORDS_PER_BLOCK) + 1
-                == 0) {
+        if (!wal && address % RecordUtil.blockSizeWithTrailer(recordSize) == 0) {
             insertSyncMarker();
         }
 
@@ -195,6 +193,9 @@ public class Buffer {
                 recordSize, byteBuffer.position(), wal);
         if (nextRecordIndex % RECORDS_PER_BLOCK == 0) {
             closeBlock();
+            if (wal) {
+                insertSyncMarker();
+            }
         }
         return address;
     }
@@ -241,9 +242,6 @@ public class Buffer {
         final int blockSize = recordSize * RECORDS_PER_BLOCK;
         crc32.update(byteBuffer.array(), byteBuffer.position() - blockSize, blockSize);
         byteBuffer.putInt((int) crc32.getValue());
-        if (wal) {
-            insertSyncMarker();
-        }
     }
 
     protected void insertSyncMarker() {

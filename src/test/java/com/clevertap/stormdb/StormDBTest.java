@@ -1,5 +1,6 @@
 package com.clevertap.stormdb;
 
+import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,8 +17,11 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 // TODO: 10/07/2020 test with more than Integer.MAX_VALUE records
 class StormDBTest {
@@ -57,8 +61,13 @@ class StormDBTest {
         });
     }
 
-    @Test
-    void compactionTest() throws IOException, StormDBException {
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1,
+            RECORDS_PER_BLOCK - 1,
+            RECORDS_PER_BLOCK,
+            RECORDS_PER_BLOCK + 1,
+            100, 1000, 10_000, 100_000, 200_000, 349_440})
+    void compactionTest(final int totalRecords) throws IOException, StormDBException {
         final Path path = Files.createTempDirectory("stormdb");
 
         final int valueSize = 8;
@@ -66,7 +75,7 @@ class StormDBTest {
 
         final HashMap<Integer, Long> kvCache = new HashMap<>();
 
-        final int totalRecords = 100;
+//        final int totalRecords = 100;
         for (int i = 0; i < totalRecords; i++) {
             long val = (long) (Math.random() * Long.MAX_VALUE);
             final ByteBuffer value = ByteBuffer.allocate(valueSize);
@@ -84,7 +93,7 @@ class StormDBTest {
         // Make sure all is well
         verifyDb(db, totalRecords, kvCache);
 
-        int count = 50;
+        int count = totalRecords / 2;
         while (count-- > 0) {
             final ByteBuffer value = ByteBuffer.allocate(valueSize);
             long val = (long) (Math.random() * Long.MAX_VALUE);
@@ -122,7 +131,7 @@ class StormDBTest {
 
         final int totalRecords = 1_000_000;
         final int maxSleepMs = 100;
-        int timeToRunInSeconds = 10;
+        final int[] timeToRunInSeconds = {10};
         long[] kvCache = new long[totalRecords];
 
         final Boolean[] exceptionThrown = { false };
@@ -168,7 +177,7 @@ class StormDBTest {
         });
 
         service.submit(() -> {
-            while(!shutdown[0]) {
+            while (!shutdown[0]) {
                 // Iterate sequentially.
                 try {
                     db.iterate((key, data, offset) -> {
@@ -177,7 +186,7 @@ class StormDBTest {
                             assertTrue(kvCache[key] >= value.getLong());
                         }
                     });
-                } catch (IOException e) {
+                } catch (Exception e) {
                     e.printStackTrace();
                     exceptionThrown[0] = true;
                 }
@@ -186,22 +195,33 @@ class StormDBTest {
             System.out.println("Finished iteration thread.");
         });
 
-        // Verifier / Reader
+        // Tracker thread
         service.submit(() -> {
-            try {
-                while (!shutdown[0]) {
-                    // Verify.
+            while(timeToRunInSeconds[0]-- > 0) {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            shutdown[0] = true;
+            System.out.println("Finished tracker thread. Exiting.");
+        });
+
+        // Verifier / Reader
+
+        while (!shutdown[0]) {
 //                    System.out.println("VERIFY1=");
-                    for (int i = 0; i < totalRecords; i++) {
-                        final byte[] bytes;
-                        try {
+            for (int i = 0; i < totalRecords; i++) {
+                final byte[] bytes;
+                try {
 //                            System.out.println("VERIFY2-" + i);
-                            bytes = db.randomGet(i);
-                            if (bytes == null) {
-                                continue;
-                            }
-                            final ByteBuffer value = ByteBuffer.wrap(bytes);
-                            final long longValue = value.getLong();
+                    bytes = db.randomGet(i);
+                    if (bytes == null) {
+                        continue;
+                    }
+                    final ByteBuffer value = ByteBuffer.wrap(bytes);
+                    final long longValue = value.getLong();
 //                            System.out.println("VERIFY3-" + i + " value=" + longValue +
 //                                    " kvCache[i] = " + kvCache[i]);
                             synchronized (kvCache) {
@@ -211,25 +231,15 @@ class StormDBTest {
                                 assertTrue(kvCache[i] >= longValue);
                             }
 //                            System.out.println("VERIFY4-" + i);
-                        } catch (IOException e) {
-                            exceptionThrown[0] = true;
-                            throw e;
-                        }
-                    }
-                    sleepRandomMs("verifier", maxSleepMs);
+                } catch (IOException e) {
+                    exceptionThrown[0] = true;
+                    throw e;
                 }
-            } catch (Exception e) {
-                exceptionThrown[0] = true;
-                System.out.println("Exception in verifier."+e.getLocalizedMessage());
-                e.printStackTrace();
             }
-            System.out.println("Finished verification thread.");
-        });
-
-        while(timeToRunInSeconds-- > 0) {
-            Thread.sleep(1000);
+            sleepRandomMs("verifier", maxSleepMs);
         }
-        shutdown[0] = true;
+        System.out.println("Completed verification in main thread.");
+
         System.out.println("service.awaitTermination for 5 seconds started.");
         service.shutdown();
         assertTrue(service.awaitTermination(5, TimeUnit.SECONDS));
