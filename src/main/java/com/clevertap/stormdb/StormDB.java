@@ -15,6 +15,7 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -65,6 +66,8 @@ public class StormDB {
     private final TIntIntHashMap index = new TIntIntHashMap(100_000, 0.95f, Integer.MAX_VALUE,
             NO_MAPPING_FOUND);
     // TODO: 08/07/20 Revisit bitset memory optimization later.
+    // TODO: 14/07/2020 move EVERYTHING for compaction use to a compaction class
+    private long nextFileRecordIndex = 0;
     private BitSet dataInWalFile = new BitSet();
     private BitSet dataInNextFile; // TODO: 09/07/20 We can get rid of this bitset. revisit.
     private BitSet dataInNextWalFile;
@@ -235,9 +238,8 @@ public class StormDB {
     public void compact() throws IOException {
         synchronized (compactionLock) {
             // 1. Move wal to wal.prev and create new wal file.
+            rwLock.writeLock().lock();
             try {
-                rwLock.writeLock().lock();
-
                 // First flush all data.
                 // This is because we will be resetting bytesInWalFile below and we need to get all
                 // buffer to file so that their offsets are honoured.
@@ -260,6 +262,7 @@ public class StormDB {
                 // Create new walOut File
                 walOut = new DataOutputStream(new FileOutputStream(nextWalFile));
                 bytesInWalFile = 0;
+                nextFileRecordIndex = 0;
 
                 // TODO: 08/07/20 Remember to invalidate/refresh file handles in thread local
 
@@ -272,9 +275,9 @@ public class StormDB {
             nextDataFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
                     FILE_NAME_DATA + FILE_TYPE_NEXT);
 
-            try (final DataOutput out = new DataOutput(
+            try (final BufferedOutputStream out =
                     new BufferedOutputStream(new FileOutputStream(nextDataFile),
-                            buffer.getWriteBufferSize()))) {
+                            buffer.getWriteBufferSize())) {
 
                 final Buffer tmpBuffer = new Buffer(valueSize, false, false);
 
@@ -335,10 +338,8 @@ public class StormDB {
         }
     }
 
-    private void flushNext(DataOutput writer, Buffer buffer) throws IOException {
-        final long bytesWritten = writer.getBytesWritten();
-
-        buffer.flush(writer);
+    private void flushNext(OutputStream out, Buffer buffer) throws IOException {
+        buffer.flush(out);
 
         try {
             rwLock.writeLock().lock();
@@ -346,7 +347,9 @@ public class StormDB {
 
             while (iterator.hasMoreElements()) {
                 final ByteBuffer byteBuffer = iterator.nextElement();
-                final long address = byteBuffer.position() + bytesWritten;
+                final long address = RecordUtil
+                        .indexToAddress(recordSize, nextFileRecordIndex, false);
+                nextFileRecordIndex++;
                 final int key = byteBuffer.getInt();
                 if (!dataInNextWalFile.get(key)) {
                     index.put(key, RecordUtil.addressToIndex(recordSize, address, false));

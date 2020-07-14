@@ -15,11 +15,11 @@ public class RecordUtil {
         return recordSize * RECORDS_PER_BLOCK + CRC_SIZE + recordSize;
     }
 
-    public static long indexToAddress(final int recordSize, final int recordIndex,
+    public static long indexToAddress(final int recordSize, final long recordIndex,
             final boolean wal) {
         final int blockSize = blockSizeWithTrailer(recordSize);
-        final int blocksBefore = recordIndex / RECORDS_PER_BLOCK;
-        long address = (long) blocksBefore * blockSize
+        final long blocksBefore = recordIndex / RECORDS_PER_BLOCK;
+        long address = blocksBefore * blockSize
                 + (recordIndex % RECORDS_PER_BLOCK) * recordSize;
 
         // Account for the sync marker kv pair before the start of the current block.
