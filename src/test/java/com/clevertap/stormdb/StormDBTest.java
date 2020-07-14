@@ -120,7 +120,7 @@ class StormDBTest {
 
         final int totalRecords = 1000_000;
         final int maxSleepMs = 100;
-        int timeToRunInSeconds = 10;
+        int timeToRunInSeconds = 100;
         long[] kvCache = new long[totalRecords];
 
         final Boolean[] exceptionThrown = { false };

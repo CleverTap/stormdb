@@ -509,20 +509,33 @@ public class StormDB {
                 }
                 if (foundInMemory) {
                     final int offsetInWriteBuffer = (offsetInData - writeOffsetWal) * recordSize;
+                    if(writeBuffer.array().length < offsetInWriteBuffer + recordSize) {
+                        System.out.println(
+                                "offsetInData="+offsetInData+"\n" + "writeOffsetWal="+writeOffsetWal+"\n"
+                                + "writeBuffer.array().length="+writeBuffer.array().length+"\n"
+                                +"offsetInWriteBuffer="+offsetInWriteBuffer + "\n"
+                                +"dataInNextWalFile != null = " + (dataInNextWalFile != null)
+                        );
+                    }
                     System.arraycopy(writeBuffer.array(), offsetInWriteBuffer + keySize, value, 0,
                             valueSize);
+//                    System.out.println("Returning from inMemory.");
                     return value;
                 }
             }
 
             if (dataInNextWalFile != null && dataInNextWalFile.get(key)) {
                 f = getReadRandomAccessFile(walNextReader, nextWalFile);
+//                System.out.println("Returning from nextWalFile.");
             } else if (dataInNextFile != null && dataInNextFile.get(key)) {
                 f = getReadRandomAccessFile(dataNextReader, nextDataFile);
+//                System.out.println("Returning from nextDataFile.");
             } else if (dataInWalFile.get(key)) {
                 f = getReadRandomAccessFile(walReader, walFile);
+//                System.out.println("Returning from walFile.");
             } else {
                 f = getReadRandomAccessFile(dataReader, dataFile);
+//                System.out.println("Returning from dataFile.");
             }
         } finally {
             rwLock.readLock().unlock();
