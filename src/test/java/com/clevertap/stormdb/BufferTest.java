@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.clevertap.stormdb.exceptions.ReadOnlyBufferException;
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -249,5 +250,19 @@ class BufferTest {
         }
 
         assertArrayEquals(expectedKeysReceivedOrder.toArray(), keysReceivedOrder.toArray());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void addReadOnly(final boolean wal) {
+        final Buffer buffer = new Buffer(10, true, wal);
+        assertThrows(ReadOnlyBufferException.class, () -> buffer.add(0, new byte[10], 0));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void flushReadOnly(final boolean wal) {
+        final Buffer buffer = new Buffer(10, true, wal);
+        assertThrows(ReadOnlyBufferException.class, () -> buffer.flush(new ByteArrayOutputStream()));
     }
 }

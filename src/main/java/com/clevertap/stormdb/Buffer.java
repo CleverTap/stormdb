@@ -5,7 +5,7 @@ import static com.clevertap.stormdb.StormDB.KEY_SIZE;
 import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
 import static com.clevertap.stormdb.StormDB.RESERVED_KEY_MARKER;
 
-import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
+import com.clevertap.stormdb.exceptions.ReadOnlyBufferException;
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
 import com.clevertap.stormdb.utils.RecordUtil;
 import java.io.IOException;
@@ -94,7 +94,7 @@ public class Buffer {
 
     public int flush(final OutputStream out) throws IOException {
         if (readOnly) {
-            throw new StormDBRuntimeException("Initialised in read only mode!");
+            throw new ReadOnlyBufferException("Initialised in read only mode!");
         }
 
         if (byteBuffer.position() == 0) {
@@ -181,7 +181,7 @@ public class Buffer {
 
     public int add(int key, byte[] value, int valueOffset) {
         if (readOnly) {
-            throw new StormDBRuntimeException("Initialised in read only mode!");
+            throw new ReadOnlyBufferException("Initialised in read only mode!");
         }
         final int address = byteBuffer.position();
 
