@@ -145,7 +145,6 @@ public class Buffer {
                 }
             }
         }
-        // TODO: 13/07/2020 we cannot use a threadlocal, since in a multi db scenario, we'll keep opening files - use a hashmap instead
     }
 
     private int fillBuffer(RandomAccessFile file, Consumer<ByteBuffer> recordConsumer)
