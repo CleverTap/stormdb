@@ -6,12 +6,9 @@ import com.clevertap.stormdb.exceptions.StormDBException;
 import com.clevertap.stormdb.utils.ByteUtil;
 import com.clevertap.stormdb.utils.RecordUtil;
 import gnu.trove.map.hash.TIntIntHashMap;
-import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
-import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -125,7 +122,7 @@ public class StormDB {
         recordSize = valueSize + KEY_SIZE;
 
         blockSize = (4096 / recordSize) * recordSize;
-        buffer = new Buffer(valueSize, false, true);
+        buffer = new Buffer(valueSize, false);
 
         dataFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA);
         walFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_WAL);
@@ -143,15 +140,6 @@ public class StormDB {
                         + valueSizeFromMeta + " bytes. "
                         + "However, " + valueSize + " bytes was provided!");
             }
-
-            // Now do compaction if we stopped just while doing compaction.
-            if (new File(dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA +
-                    FILE_TYPE_NEXT).exists()) {
-                // Recover implicitly builds index.
-                recover();
-            }
-            buildIndex(false);
-            buildIndex(true);
         } else {
             // New database. Write value size to the meta.
             final ByteBuffer out = ByteBuffer.allocate(4);
@@ -162,10 +150,8 @@ public class StormDB {
         walOut = new DataOutputStream(new FileOutputStream(walFile, true));
         bytesInWalFile = walFile.length();
 
-        if (walFile.length() % recordSize != 0) {
-            // Corrupted WAL - somebody should run compact!
-            recover();
-        }
+        recover();
+        buildIndex();
 
         // TODO: 13/07/20 Make auto compaction configurable.
         if (this.autoCompact) {
@@ -196,34 +182,57 @@ public class StormDB {
         return true;
     }
 
+    private void buildIndex() {
+        // TODO: 15/07/2020
+    }
+
+    /**
+     * Recovers the database if it's corrupted.
+     * <p>
+     * Calling this brings the database to a state where exactly two files exist: the WAL file, and
+     * the data file.
+     */
     private void recover() throws IOException {
-        // This scenario can happen only at start.
+        // If the database was shutdown during a compaction, delete data.next,
+        // and append wal.next to wal.
+        final File nextWalFile = new File(dbDirFile.getAbsolutePath()
+                + File.pathSeparator + FILE_NAME_WAL + FILE_TYPE_NEXT);
 
-        // 1. Simply append wal.next to wal file and compact
-        File nextWalFile = new File(
-                dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA + FILE_TYPE_NEXT);
-        File currentWalFile = new File(
-                dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA);
+        boolean nextWalFileDeleted = false;
 
-        try (FileInputStream inStream = new FileInputStream(nextWalFile);
-                FileOutputStream outStream = new FileOutputStream(currentWalFile, true)) {
-
-            byte[] buffer = new byte[FOUR_MB];
-            int length;
-            while ((length = inStream.read(buffer)) > 0) {
-                outStream.write(buffer, 0, length);
-            }
+        if (nextWalFile.exists()) {
+            // Safe, since walOut is always opened in an append only mode.
+            Files.copy(nextWalFile.toPath(), walOut);
+            walOut.flush();
+            Files.delete(nextWalFile.toPath());
+            nextWalFileDeleted = true;
         }
 
-        // 2. For cleanliness sake, delete .next files.
-        Files.deleteIfExists(nextWalFile.toPath());
-        File nextDataFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
+        // If a next data file exists, but no corresponding nextWalFile, then that probably
+        // means that just towards the end of the last compaction, the nextWalFile was deleted,
+        // but the rename of next data file failed. Don't delete, but simply treat the next data
+        // as a part of the WAL file.
+        final File nextDataFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
                 FILE_NAME_DATA + FILE_TYPE_NEXT);
 
-        Files.deleteIfExists(nextDataFile.toPath());
+        if (nextDataFile.exists() && !nextWalFileDeleted) {
+            // Safe, since walOut is always opened in an append only mode.
+            Files.copy(nextDataFile.toPath(), walOut);
+            walOut.flush();
 
-        // 3. Now finally call the compact procedure
-        compact();
+            Files.delete(nextDataFile.toPath());
+        }
+
+        // Let's run a sequential scan and verify the two files.
+        verifyDatabaseIntegrity();
+    }
+
+    /**
+     * Ensures that all blocks in the data and the WAL file match their CRC32 checksums. If they
+     * don't, reconstruct the file with only valid blocks.
+     */
+    private void verifyDatabaseIntegrity() {
+
     }
 
     private void rename(final File file, final File destination) throws IOException {
@@ -287,7 +296,7 @@ public class StormDB {
                     new BufferedOutputStream(new FileOutputStream(nextDataFile),
                             buffer.getWriteBufferSize())) {
 
-                final Buffer tmpBuffer = new Buffer(valueSize, false, false);
+                final Buffer tmpBuffer = new Buffer(valueSize, false);
 
                 iterate(false, false, (key, data, offset) -> {
                     tmpBuffer.add(key, data, offset);
@@ -307,9 +316,8 @@ public class StormDB {
             File dataFileToDelete = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
                     FILE_NAME_DATA + FILE_TYPE_DELETE);
 
+            rwLock.writeLock().lock();
             try {
-                rwLock.writeLock().lock();
-
                 // First rename prevWalFile and prevDataFile so that .next can be renamed
                 rename(walFile, walFileToDelete);
                 rename(dataFile, dataFileToDelete);
@@ -351,16 +359,16 @@ public class StormDB {
 
         try {
             rwLock.writeLock().lock();
-            final Enumeration<ByteBuffer> iterator = buffer.iterator();
+            final Enumeration<ByteBuffer> iterator = buffer.iterator(false);
 
             while (iterator.hasMoreElements()) {
                 final ByteBuffer byteBuffer = iterator.nextElement();
                 final long address = RecordUtil
-                        .indexToAddress(recordSize, nextFileRecordIndex, false);
+                        .indexToAddress(recordSize, nextFileRecordIndex);
                 nextFileRecordIndex++;
                 final int key = byteBuffer.getInt();
                 if (!dataInNextWalFile.get(key)) {
-                    index.put(key, RecordUtil.addressToIndex(recordSize, address, false));
+                    index.put(key, RecordUtil.addressToIndex(recordSize, address));
                     dataInNextFile.set(key);
                 }
             }
@@ -403,7 +411,7 @@ public class StormDB {
             final int addressInBuffer = buffer.add(key, value, valueOffset);
 
             final int address = RecordUtil.addressToIndex(recordSize,
-                    bytesInWalFile + addressInBuffer, true);
+                    bytesInWalFile + addressInBuffer);
             index.put(key, address);
 
             if (isCompactionInProgress()) {
@@ -465,7 +473,7 @@ public class StormDB {
             }
 
             if (readInMemoryBuffer) {
-                inMemRecords = buffer.iterator();
+                inMemRecords = buffer.iterator(true);
             }
         } finally {
             rwLock.readLock().unlock();
@@ -497,11 +505,9 @@ public class StormDB {
         // TODO: 09/07/20 Handle incomplete writes to disk while iteration. Needed esp. while recovery.
         // TODO: 13/07/2020 send context of data (wal vs data)
 
-        final Buffer walReader = new Buffer(valueSize, true, true);
-        walReader.readFromFiles(walFiles, entryConsumer);
-
-        final Buffer dataReader = new Buffer(valueSize, true, false);
-        dataReader.readFromFiles(dataFiles, entryConsumer);
+        final Buffer reader = new Buffer(valueSize, true);
+        reader.readFromFiles(walFiles, entryConsumer, true);
+        reader.readFromFiles(dataFiles, entryConsumer, false);
     }
 
     public byte[] randomGet(final int key) throws IOException, StormDBException {
@@ -519,7 +525,7 @@ public class StormDB {
             value = new byte[valueSize];
 
             if (isCompactionInProgress() && dataInNextWalFile.get(key)) {
-                address = RecordUtil.indexToAddress(recordSize, recordIndex, true);
+                address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 if (address >= bytesInWalFile) {
                     System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + KEY_SIZE),
                             value, 0, valueSize);
@@ -527,10 +533,10 @@ public class StormDB {
                 }
                 f = getReadRandomAccessFile(walNextReader, nextWalFile);
             } else if (isCompactionInProgress() && dataInNextFile.get(key)) {
-                address = RecordUtil.indexToAddress(recordSize, recordIndex, false);
+                address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 f = getReadRandomAccessFile(dataNextReader, nextDataFile);
             } else if (dataInWalFile.get(key)) {
-                address = RecordUtil.indexToAddress(recordSize, recordIndex, true);
+                address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 // If compaction is in progress, we can not read in-memory.
                 if (!isCompactionInProgress() && address >= bytesInWalFile) {
                     System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + KEY_SIZE),
@@ -539,7 +545,7 @@ public class StormDB {
                 }
                 f = getReadRandomAccessFile(walReader, walFile);
             } else {
-                address = RecordUtil.indexToAddress(recordSize, recordIndex, false);
+                address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 f = getReadRandomAccessFile(dataReader, dataFile);
             }
         } finally {
@@ -567,57 +573,6 @@ public class StormDB {
             reader.set(f);
         }
         return f;
-    }
-
-    /**
-     * Builds a key to record index by reading the following:
-     * <p>
-     * 1. Data file (as a result of the last compaction)
-     * <p>
-     * 2. WAL file (contains the most recently written records)
-     * <p>
-     * Both files are iterated over sequentially.
-     */
-    private void buildIndex(final boolean walContext) throws IOException {
-        // TODO: 13/07/2020 migrate to the new walReader
-        final File dataFile = walContext ? this.walFile : this.dataFile;
-        if (!dataFile.exists()) {
-            return;
-        }
-
-        final ByteBuffer buf = ByteBuffer.allocate(blockSize);
-
-        int recordIndex = 0;
-
-        try (final BufferedInputStream bufIn = new BufferedInputStream(
-                new FileInputStream(dataFile));
-                final DataInputStream in = new DataInputStream(bufIn)) {
-
-            while (true) {
-                buf.clear();
-
-                final int limit = in.read(buf.array());
-                if (limit == -1) {
-                    break;
-                }
-                buf.limit(limit);
-
-                while (buf.remaining() >= recordSize) {
-                    // TODO: 07/07/2020 assert alignment
-                    // TODO: 10/07/2020 verify crc32 checksum
-                    // TODO: 10/07/2020 verify sync marker
-                    // TODO: 10/07/2020 support auto recovery
-                    final int key = buf.getInt();
-                    buf.position(buf.position() + valueSize);
-                    index.put(key, recordIndex);
-                    if (walContext) {
-                        dataInWalFile.set(key);
-                    }
-
-                    recordIndex++;
-                }
-            }
-        }
     }
 
     public void close() throws IOException, InterruptedException {

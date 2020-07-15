@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -50,8 +51,9 @@ import org.mockito.Mockito;
  * Created by Jude Pereira, at 17:52 on 09/07/2020.
  */
 class BufferTest {
+
     private static Buffer newBuffer(final int valueSize) {
-        return new Buffer(valueSize, false, true);
+        return new Buffer(valueSize, false);
     }
 
     @Test
@@ -75,6 +77,7 @@ class BufferTest {
         // TODO: 13/07/2020 add check for verifying that a buffer is set to new after clear
     }
 
+    // TODO: 15/07/2020 add test cases which verify the address returned
     @ParameterizedTest
     @ValueSource(ints = {1, 8, 100})
     void verifyIncompleteBlockPadding(final int valueSize)
@@ -85,7 +88,7 @@ class BufferTest {
 
         final AtomicInteger recordsAdded = new AtomicInteger();
         final AtomicInteger syncMarkersAdded = new AtomicInteger();
-        final Buffer buffer = new Buffer(valueSize, false, true) {
+        final Buffer buffer = new Buffer(valueSize, false) {
             @Override
             public int add(int key, byte[] value, int valueOffset) {
                 recordsAdded.incrementAndGet();
@@ -106,7 +109,7 @@ class BufferTest {
         buffer.add(28, expectedValue, 0);
 
         assertEquals(1, recordsAdded.get());
-        assertEquals(0, syncMarkersAdded.get());
+        assertEquals(1, syncMarkersAdded.get());
 
         buffer.flush(new ByteArrayOutputStream());
 
@@ -116,12 +119,11 @@ class BufferTest {
         assertEquals(1, syncMarkersAdded.get());
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void verifyBlockTrailer(final boolean wal) throws ValueSizeTooLargeException, IOException {
+    @Test
+    void verifyBlockTrailer() throws ValueSizeTooLargeException, IOException {
         final int valueSize = 100;
         final int recordSize = valueSize + KEY_SIZE;
-        final Buffer buffer = new Buffer(valueSize, false, wal);
+        final Buffer buffer = new Buffer(valueSize, false);
         final CRC32 crc32 = new CRC32();
 
         for (int i = 0; i < RECORDS_PER_BLOCK; i++) {
@@ -141,20 +143,12 @@ class BufferTest {
         final ByteBuffer bytesWritten = ByteBuffer.wrap(out.toByteArray());
 
         // Verify CRC32 checksum.
-        if (wal) {
-            bytesWritten.position(RECORDS_PER_BLOCK * recordSize);
-        } else {
-            bytesWritten.position(RECORDS_PER_BLOCK * recordSize + recordSize);
-        }
+        bytesWritten.position(RECORDS_PER_BLOCK * recordSize + recordSize);
         assertNotEquals(0, crc32.getValue());
         assertEquals((int) crc32.getValue(), bytesWritten.getInt());
 
         // Verify the sync marker.
-        if (wal) {
-            bytesWritten.position(RECORDS_PER_BLOCK * recordSize + CRC_SIZE);
-        } else {
-            bytesWritten.position(0);
-        }
+        bytesWritten.position(0);
 
         assertEquals(StormDB.RESERVED_KEY_MARKER, bytesWritten.getInt());
         final byte[] syncMarkerExpectedValue = new byte[valueSize];
@@ -204,7 +198,7 @@ class BufferTest {
 
     @Test
     void clear() {
-        final Buffer buffer = new Buffer(10, false, true);
+        final Buffer buffer = new Buffer(10, false);
         final byte[] oldArray = buffer.array();
         buffer.clear();
         assertNotSame(oldArray, buffer.array());
@@ -240,17 +234,16 @@ class BufferTest {
 
         return builder.build();
     }
-    
+
 
     @ParameterizedTest
     @MethodSource("provideIteratorTestCases")
-    void iterator(final int valueSize, final int records, final boolean wal,
+    void iterator(final int valueSize, final int records, final boolean reverse,
             final boolean flushAndReadFromFile)
             throws ValueSizeTooLargeException, IOException {
-        final Buffer buffer = new Buffer(valueSize, false, wal);
+        final Buffer buffer = new Buffer(valueSize, false);
 
         final HashMap<Integer, byte[]> expectedMap = new HashMap<>();
-
 
         // Add N records.
         for (int i = 0; i < records; i++) {
@@ -284,9 +277,9 @@ class BufferTest {
             buffer.flush(out);
             out.flush();
             out.close();
-            final Buffer tmpBuffer = new Buffer(valueSize, true, wal);
+            final Buffer tmpBuffer = new Buffer(valueSize, true);
             final RandomAccessFile raf = new RandomAccessFile(tmpFile, "r");
-            if (wal) {
+            if (reverse) {
                 raf.seek(raf.length());
             }
             tmpBuffer.readFromFile(raf, byteBuffer -> {
@@ -301,9 +294,9 @@ class BufferTest {
                     dupCheck.set(key);
                     recordConsumer.accept(byteBuffer);
                 }
-            });
+            }, reverse);
         } else {
-            final Enumeration<ByteBuffer> iterator = buffer.iterator();
+            final Enumeration<ByteBuffer> iterator = buffer.iterator(reverse);
             while (iterator.hasMoreElements()) {
                 final ByteBuffer byteBuffer = iterator.nextElement();
                 recordConsumer.accept(byteBuffer);
@@ -314,33 +307,33 @@ class BufferTest {
 
         final ArrayList<Integer> expectedKeysReceivedOrder = new ArrayList<>();
 
-        for (int i = wal ? records - 1 : 0; wal ? i >= 0 : i < records; i += wal ? -1 : 1) {
+        for (int i = reverse ? records - 1 : 0; reverse ? i >= 0 : i < records;
+                i += reverse ? -1 : 1) {
             expectedKeysReceivedOrder.add(i);
         }
 
         assertArrayEquals(expectedKeysReceivedOrder.toArray(), keysReceivedOrder.toArray());
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void addReadOnly(final boolean wal) {
-        final Buffer buffer = new Buffer(10, true, wal);
+    @Test
+    void addReadOnly() {
+        final Buffer buffer = new Buffer(10, true);
         assertThrows(ReadOnlyBufferException.class, () -> buffer.add(0, new byte[10], 0));
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void flushReadOnly(final boolean wal) {
-        final Buffer buffer = new Buffer(10, true, wal);
+    @Test
+    void flushReadOnly() {
+        final Buffer buffer = new Buffer(10, true);
         final ByteArrayOutputStream out = new ByteArrayOutputStream();
         assertThrows(ReadOnlyBufferException.class,
                 () -> buffer.flush(out));
     }
 
-    @Test
-    void readFromFiles() throws IOException {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void readFromFiles(final boolean reverse) throws IOException {
         final Buffer buffer = Mockito.mock(Buffer.class);
-        doCallRealMethod().when(buffer).readFromFiles(any(), any());
+        doCallRealMethod().when(buffer).readFromFiles(any(), any(), anyBoolean());
 
         final ArrayList<RandomAccessFile> files = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
@@ -350,17 +343,22 @@ class BufferTest {
         final Consumer<ByteBuffer> recordConsumer = byteBuffer -> {
         };
 
-        buffer.readFromFiles(files, recordConsumer);
+        buffer.readFromFiles(files, recordConsumer, reverse);
 
-        final ArgumentCaptor<RandomAccessFile> rafCaptor = ArgumentCaptor.forClass(RandomAccessFile.class);
+        final ArgumentCaptor<RandomAccessFile> rafCaptor = ArgumentCaptor
+                .forClass(RandomAccessFile.class);
         //noinspection unchecked
-        final ArgumentCaptor<Consumer<ByteBuffer>> rcCaptor = ArgumentCaptor.forClass(Consumer.class);
+        final ArgumentCaptor<Consumer<ByteBuffer>> rcCaptor = ArgumentCaptor
+                .forClass(Consumer.class);
+        final ArgumentCaptor<Boolean> reverseCaptor = ArgumentCaptor.forClass(Boolean.class);
 
-        verify(buffer, times(files.size())).readFromFile(rafCaptor.capture(), rcCaptor.capture());
+        verify(buffer, times(files.size())).readFromFile(rafCaptor.capture(), rcCaptor.capture(),
+                reverseCaptor.capture());
 
         for (int i = 0; i < files.size(); i++) {
             assertSame(files.get(i), rafCaptor.getAllValues().get(i));
             assertSame(recordConsumer, rcCaptor.getAllValues().get(i));
+            assertSame(reverse, reverseCaptor.getAllValues().get(i));
         }
     }
 }

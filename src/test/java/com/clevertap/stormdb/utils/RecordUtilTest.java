@@ -2,38 +2,31 @@ package com.clevertap.stormdb.utils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.api.Test;
 
 /**
  * Created by Jude Pereira, at 15:19 on 10/07/2020.
  */
 class RecordUtilTest {
 
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void indexToAddress(final boolean wal) {
-        assertEquals(wal ? 0 : 10, RecordUtil.indexToAddress(10, 0, wal));
-        assertEquals(wal ? 10 : 20, RecordUtil.indexToAddress(10, 1, wal));
-        assertEquals(wal ? 127 * 10 : 127 * 10 + 10, RecordUtil.indexToAddress(10, 127, wal));
-        assertEquals(wal ? 128 * 10 + 10 + 4 : 128 * 10 + 20 + 4,
-                RecordUtil.indexToAddress(10, 128, wal));
+    @Test
+    void indexToAddress() {
+        assertEquals(10, RecordUtil.indexToAddress(10, 0));
+        assertEquals(20, RecordUtil.indexToAddress(10, 1));
+        assertEquals(127 * 10 + 10, RecordUtil.indexToAddress(10, 127));
+        assertEquals(128 * 10 + 20 + 4, RecordUtil.indexToAddress(10, 128));
 
         // Test for record indices which cross the Integer.MAX_VALUE limit.
-        assertEquals(wal ? 21709717480L - 10 : 21709717480L,
-                RecordUtil.indexToAddress(10, Integer.MAX_VALUE - 1, wal));
+        assertEquals(21709717480L, RecordUtil.indexToAddress(10, Integer.MAX_VALUE - 1));
     }
 
-    @ParameterizedTest
-    @ValueSource(booleans = {true, false})
-    void addressToIndex(final boolean wal) {
-        assertEquals(0, RecordUtil.addressToIndex(10, wal ? 0 : 10, wal));
-        assertEquals(127, RecordUtil.addressToIndex(10, wal ? 1270 : 1270 + 10, wal));
-        assertEquals(128,
-                RecordUtil.addressToIndex(10, wal ? 1280 + 4 + 10 : 1280 + 2 * 10 + 4, wal));
+    @Test
+    void addressToIndex() {
+        assertEquals(0, RecordUtil.addressToIndex(10, 10));
+        assertEquals(127, RecordUtil.addressToIndex(10, 1270 + 10));
+        assertEquals(128, RecordUtil.addressToIndex(10, 1280 + 2 * 10 + 4));
 
         // Large addresses.
-        assertEquals(Integer.MAX_VALUE - 1, RecordUtil.addressToIndex(10,
-                wal ? 21709717480L - 10 : 21709717480L, wal));
+        assertEquals(Integer.MAX_VALUE - 1, RecordUtil.addressToIndex(10, 21709717480L));
     }
 }
