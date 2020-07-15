@@ -196,7 +196,7 @@ class BufferTest {
 
             for (int records : recordsArr) {
                 for (boolean wal : wals) {
-                    if (records < Buffer.calculateMaxRecords(valueSize)) {
+                    if (records <= Buffer.calculateMaxRecords(valueSize)) {
                         builder.accept(Arguments.of(valueSize, records, wal));
                     }
                 }
