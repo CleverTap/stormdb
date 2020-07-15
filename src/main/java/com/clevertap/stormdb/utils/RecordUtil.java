@@ -43,7 +43,7 @@ public class RecordUtil {
             address -= recordSize;
         }
         final int blocksBefore = (int) (address / blockSize);
-        int recordInCurrentBlock = (int) ((address % blockSize) / recordSize);
+        final int recordInCurrentBlock = (int) ((address % blockSize) / recordSize);
         return blocksBefore * RECORDS_PER_BLOCK + recordInCurrentBlock;
     }
 }
