@@ -9,8 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import com.clevertap.stormdb.exceptions.ReadOnlyBufferException;
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
@@ -38,6 +43,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 
 /**
  * Created by Jude Pereira, at 17:52 on 09/07/2020.
@@ -325,6 +332,33 @@ class BufferTest {
     @ValueSource(booleans = {true, false})
     void flushReadOnly(final boolean wal) {
         final Buffer buffer = new Buffer(10, true, wal);
-        assertThrows(ReadOnlyBufferException.class, () -> buffer.flush(new ByteArrayOutputStream()));
+        assertThrows(ReadOnlyBufferException.class,
+                () -> buffer.flush(new ByteArrayOutputStream()));
+    }
+
+    @Test
+    void readFromFiles() throws IOException {
+        final Buffer buffer = Mockito.mock(Buffer.class);
+        doCallRealMethod().when(buffer).readFromFiles(any(), any());
+
+        final ArrayList<RandomAccessFile> files = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            files.add(Mockito.mock(RandomAccessFile.class));
+        }
+
+        final Consumer<ByteBuffer> recordConsumer = byteBuffer -> {
+        };
+
+        buffer.readFromFiles(files, recordConsumer);
+
+        final ArgumentCaptor<RandomAccessFile> rafCaptor = ArgumentCaptor.forClass(RandomAccessFile.class);
+        final ArgumentCaptor<Consumer<ByteBuffer>> rcCaptor = ArgumentCaptor.forClass(Consumer.class);
+
+        verify(buffer, times(files.size())).readFromFile(rafCaptor.capture(), rcCaptor.capture());
+
+        for (int i = 0; i < files.size(); i++) {
+            assertSame(files.get(i), rafCaptor.getAllValues().get(i));
+            assertSame(recordConsumer, rcCaptor.getAllValues().get(i));
+        }
     }
 }
