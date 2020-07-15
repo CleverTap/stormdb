@@ -1,5 +1,7 @@
 package com.clevertap.stormdb;
 
+import static com.clevertap.stormdb.StormDB.CRC_SIZE;
+import static com.clevertap.stormdb.StormDB.KEY_SIZE;
 import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -100,13 +102,16 @@ class BufferTest {
         assertEquals(1, syncMarkersAdded.get());
     }
 
-    @Test
-    void verifyBlockTrailer() throws ValueSizeTooLargeException, IOException {
-        final Buffer buffer = newBuffer(100);
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void verifyBlockTrailer(final boolean wal) throws ValueSizeTooLargeException, IOException {
+        final int valueSize = 100;
+        final int recordSize = valueSize + KEY_SIZE;
+        final Buffer buffer = new Buffer(valueSize, false, wal);
         final CRC32 crc32 = new CRC32();
 
         for (int i = 0; i < RECORDS_PER_BLOCK; i++) {
-            final byte[] value = new byte[100];
+            final byte[] value = new byte[valueSize];
             ThreadLocalRandom.current().nextBytes(value);
             crc32.update(i >> 24);
             crc32.update(i >> 16);
@@ -121,22 +126,32 @@ class BufferTest {
 
         final ByteBuffer bytesWritten = ByteBuffer.wrap(out.toByteArray());
 
-
         // Verify CRC32 checksum.
-        bytesWritten.position(RECORDS_PER_BLOCK * 104);
+        if (wal) {
+            bytesWritten.position(RECORDS_PER_BLOCK * recordSize);
+        } else {
+            bytesWritten.position(RECORDS_PER_BLOCK * recordSize + recordSize);
+        }
         assertNotEquals(0, crc32.getValue());
         assertEquals((int) crc32.getValue(), bytesWritten.getInt());
 
         // Verify the sync marker.
+        if (wal) {
+            bytesWritten.position(RECORDS_PER_BLOCK * recordSize + CRC_SIZE);
+        } else {
+            bytesWritten.position(0);
+        }
+
         assertEquals(StormDB.RESERVED_KEY_MARKER, bytesWritten.getInt());
-        final byte[] syncMarkerExpectedValue = new byte[100];
+        final byte[] syncMarkerExpectedValue = new byte[valueSize];
         Arrays.fill(syncMarkerExpectedValue, (byte) 0xFF);
-        final byte[] syncMarkerActualValue = new byte[100];
+        final byte[] syncMarkerActualValue = new byte[valueSize];
         bytesWritten.get(syncMarkerActualValue);
         assertArrayEquals(syncMarkerExpectedValue, syncMarkerActualValue);
 
         // Ensure that nothing else was written.
-        assertFalse(bytesWritten.hasRemaining());
+        assertEquals(RECORDS_PER_BLOCK * recordSize + CRC_SIZE + recordSize,
+                bytesWritten.capacity());
     }
 
     @Test
