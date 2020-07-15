@@ -37,13 +37,13 @@ public class RecordUtil {
      * @param address The absolute record address
      * @return An index for addressing this record
      */
-    public static int addressToIndex(final int recordSize, final long address, boolean wal) {
+    public static int addressToIndex(final int recordSize, long address, boolean wal) {
         final int blockSize = blockSizeWithTrailer(recordSize);
+        if (!wal) {
+            address -= recordSize;
+        }
         final int blocksBefore = (int) (address / blockSize);
         int recordInCurrentBlock = (int) ((address % blockSize) / recordSize);
-        if (!wal) {
-            recordInCurrentBlock -= 1;
-        }
         return blocksBefore * RECORDS_PER_BLOCK + recordInCurrentBlock;
     }
 }
