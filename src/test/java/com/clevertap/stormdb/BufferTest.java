@@ -332,8 +332,9 @@ class BufferTest {
     @ValueSource(booleans = {true, false})
     void flushReadOnly(final boolean wal) {
         final Buffer buffer = new Buffer(10, true, wal);
+        final ByteArrayOutputStream out = new ByteArrayOutputStream();
         assertThrows(ReadOnlyBufferException.class,
-                () -> buffer.flush(new ByteArrayOutputStream()));
+                () -> buffer.flush(out));
     }
 
     @Test
