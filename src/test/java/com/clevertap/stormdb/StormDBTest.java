@@ -5,11 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.clevertap.stormdb.exceptions.StormDBException;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
-import com.clevertap.stormdb.exceptions.StormDBException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -17,7 +17,6 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -228,12 +227,6 @@ class StormDBTest {
 //                            System.out.println("VERIFY3-" + i + " value=" + longValue +
 //                                    " kvCache[i] = " + kvCache[i]);
                     synchronized (kvCache) {
-                        if(kvCache[i] < longValue) {
-                            System.out.println(db.dbgList.get(db.dbgList.size()-3));
-                            System.out.println(db.dbgList.get(db.dbgList.size()-2));
-                            System.out.println(db.dbgList.get(db.dbgList.size()-1));
-                            System.out.println("Break found. - " + i + " / "+ kvCache[i] + " / "+ longValue);
-                        }
                         assertTrue(kvCache[i] >= longValue);
                     }
 //                            System.out.println("VERIFY4-" + i);
