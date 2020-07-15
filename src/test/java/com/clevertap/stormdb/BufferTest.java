@@ -352,6 +352,7 @@ class BufferTest {
         buffer.readFromFiles(files, recordConsumer);
 
         final ArgumentCaptor<RandomAccessFile> rafCaptor = ArgumentCaptor.forClass(RandomAccessFile.class);
+        //noinspection unchecked
         final ArgumentCaptor<Consumer<ByteBuffer>> rcCaptor = ArgumentCaptor.forClass(Consumer.class);
 
         verify(buffer, times(files.size())).readFromFile(rafCaptor.capture(), rcCaptor.capture());
