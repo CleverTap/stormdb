@@ -15,14 +15,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.clevertap.stormdb.exceptions.ReadOnlyBufferException;
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 import java.util.stream.Stream.Builder;
 import java.util.zip.CRC32;
@@ -199,6 +206,7 @@ class BufferTest {
     private static Stream<Arguments> provideIteratorTestCases() {
         final int[] valueSizes = {1, 2, 4, 8, 16, 32, 64, 128, 512, 1024, 2048, 4096};
         final boolean[] wals = {true, false}; // true for WAL, false for data.
+        final boolean[] flushAndRead = {true, false};
 
         final Builder<Arguments> builder = Stream.builder();
 
@@ -212,9 +220,13 @@ class BufferTest {
 
             for (int records : recordsArr) {
                 for (boolean wal : wals) {
-                    if (records <= Buffer.calculateMaxRecords(valueSize)) {
-                        builder.accept(Arguments.of(valueSize, records, wal));
+                    for (boolean far : flushAndRead) {
+                        if (records <= Buffer.calculateMaxRecords(valueSize)) {
+                            builder.accept(Arguments.of(valueSize, records, wal, far));
+                            builder.accept(Arguments.of(valueSize, records, wal, far));
+                        }
                     }
+
                 }
             }
         }
@@ -225,11 +237,13 @@ class BufferTest {
 
     @ParameterizedTest
     @MethodSource("provideIteratorTestCases")
-    void iterator(final int valueSize, final int records, final boolean wal)
-            throws ValueSizeTooLargeException {
+    void iterator(final int valueSize, final int records, final boolean wal,
+            final boolean flushAndReadFromFile)
+            throws ValueSizeTooLargeException, IOException {
         final Buffer buffer = new Buffer(valueSize, false, wal);
 
         final HashMap<Integer, byte[]> expectedMap = new HashMap<>();
+
 
         // Add N records.
         for (int i = 0; i < records; i++) {
@@ -244,17 +258,49 @@ class BufferTest {
             expectedMap.put(i, value);
         }
 
-        final Enumeration<ByteBuffer> iterator = buffer.iterator();
-
-        assertEquals(records > 0, iterator.hasMoreElements());
         final ArrayList<Integer> keysReceivedOrder = new ArrayList<>();
-        while (iterator.hasMoreElements()) {
-            final ByteBuffer byteBuffer = iterator.nextElement();
+
+        final Consumer<ByteBuffer> recordConsumer = byteBuffer -> {
             final int key = byteBuffer.getInt();
             final byte[] actualValue = new byte[valueSize];
             byteBuffer.get(actualValue);
             assertArrayEquals(expectedMap.get(key), actualValue);
             keysReceivedOrder.add(key);
+        };
+
+        if (flushAndReadFromFile) {
+            final BitSet dupCheck = new BitSet();
+            final Path tmpPath = Files.createTempFile("stormdb_", "_buffer");
+            final File tmpFile = tmpPath.toFile();
+            tmpFile.deleteOnExit();
+            final FileOutputStream out = new FileOutputStream(tmpFile);
+            buffer.flush(out);
+            out.flush();
+            out.close();
+            final Buffer tmpBuffer = new Buffer(valueSize, true, wal);
+            final RandomAccessFile raf = new RandomAccessFile(tmpFile, "r");
+            if (wal) {
+                raf.seek(raf.length());
+            }
+            tmpBuffer.readFromFile(raf, byteBuffer -> {
+                // Since we're reading from disk, we might hit the same key more than once.
+                // This is due to the fact that the last record in a buffer is duplicated
+                // up to a total of 127 times, to make all blocks in the buffer a multiple
+                // of 128.
+
+                final int key = byteBuffer.getInt();
+                byteBuffer.position(byteBuffer.position() - 4);
+                if (!dupCheck.get(key)) {
+                    dupCheck.set(key);
+                    recordConsumer.accept(byteBuffer);
+                }
+            });
+        } else {
+            final Enumeration<ByteBuffer> iterator = buffer.iterator();
+            while (iterator.hasMoreElements()) {
+                final ByteBuffer byteBuffer = iterator.nextElement();
+                recordConsumer.accept(byteBuffer);
+            }
         }
 
         assertEquals(records, keysReceivedOrder.size());
