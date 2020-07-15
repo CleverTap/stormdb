@@ -32,7 +32,7 @@ public class RecordUtil {
     /**
      * Given an address, it translates it to a record index.
      * <p>
-     * See {@link #indexToAddress(int, int, boolean)}.
+     * See {@link #indexToAddress(int, long, boolean)}.
      *
      * @param address The absolute record address
      * @return An index for addressing this record
