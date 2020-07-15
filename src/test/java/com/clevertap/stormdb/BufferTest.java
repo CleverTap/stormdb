@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -164,6 +165,14 @@ class BufferTest {
         }
 
         assertTrue(buf.isFull());
+    }
+
+    @Test
+    void clear() {
+        final Buffer buffer = new Buffer(10, false, true);
+        final byte[] oldArray = buffer.array();
+        buffer.clear();
+        assertNotSame(oldArray, buffer.array());
     }
 
     @ParameterizedTest
