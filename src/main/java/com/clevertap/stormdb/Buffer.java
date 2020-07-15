@@ -64,19 +64,24 @@ public class Buffer {
             throw new ValueSizeTooLargeException();
         }
 
-        int recordsToBuffer = Math.max(FOUR_MB / recordSize, RECORDS_PER_BLOCK);
+        this.maxRecords = calculateMaxRecords(valueSize);
 
-        // Get to the nearest multiple of 128.
-        recordsToBuffer = (recordsToBuffer / RECORDS_PER_BLOCK) * RECORDS_PER_BLOCK;
-        this.maxRecords = recordsToBuffer;
-
-        final int blocks = recordsToBuffer / RECORDS_PER_BLOCK;
+        final int blocks = this.maxRecords / RECORDS_PER_BLOCK;
 
         // Each block will have 1 CRC and 1 sync marker (the sync marker is one kv pair)
         final int writeBufferSize = blocks * RECORDS_PER_BLOCK * recordSize
                 + (blocks * (CRC_SIZE + recordSize));
 
         byteBuffer = ByteBuffer.allocate(writeBufferSize);
+    }
+
+    public static int calculateMaxRecords(final int valueSize) {
+        final int recordSize = valueSize + KEY_SIZE;
+        int recordsToBuffer = Math.max(FOUR_MB / recordSize, RECORDS_PER_BLOCK);
+
+        // Get to the nearest multiple of 128.
+        recordsToBuffer = (recordsToBuffer / RECORDS_PER_BLOCK) * RECORDS_PER_BLOCK;
+        return recordsToBuffer;
     }
 
     public int getMaxRecords() {

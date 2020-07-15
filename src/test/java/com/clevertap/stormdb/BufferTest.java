@@ -17,11 +17,16 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
+import java.util.stream.Stream.Builder;
 import java.util.zip.CRC32;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
@@ -175,14 +180,39 @@ class BufferTest {
         assertNotSame(oldArray, buffer.array());
     }
 
+    private static Stream<Arguments> provideIteratorTestCases() {
+        final int[] valueSizes = {1, 2, 4, 8, 16, 32, 64, 128, 512, 1024, 2048, 4096};
+        final boolean[] wals = {true, false}; // true for WAL, false for data.
+
+        final Builder<Arguments> builder = Stream.builder();
+
+        for (int valueSize : valueSizes) {
+            final int[] recordsArr = {0, 1,
+                    RECORDS_PER_BLOCK - 1,
+                    RECORDS_PER_BLOCK,
+                    RECORDS_PER_BLOCK + 1,
+                    100, 1000, 10_000, 100_000, 200_000,
+                    Buffer.calculateMaxRecords(valueSize)};
+
+            for (int records : recordsArr) {
+                for (boolean wal : wals) {
+                    if (records < Buffer.calculateMaxRecords(valueSize)) {
+                        builder.accept(Arguments.of(valueSize, records, wal));
+                    }
+                }
+            }
+        }
+
+        return builder.build();
+    }
+
     @ParameterizedTest
-    @ValueSource(ints = {0, 1,
-            RECORDS_PER_BLOCK - 1,
-            RECORDS_PER_BLOCK,
-            RECORDS_PER_BLOCK + 1,
-            100, 1000, 10_000, 100_000, 200_000, 349_440})
-    void iterator(final int records) throws ValueSizeTooLargeException {
-        final Buffer buffer = newBuffer(8);
+    @MethodSource("provideIteratorTestCases")
+    void iterator(final int valueSize, final int records, final boolean wal)
+            throws ValueSizeTooLargeException {
+        final Buffer buffer = new Buffer(valueSize, false, wal);
+
+        final HashMap<Integer, byte[]> expectedMap = new HashMap<>();
 
         // Add N records.
         for (int i = 0; i < records; i++) {
@@ -191,9 +221,10 @@ class BufferTest {
                         "Too many values for test case! Requested: " + records + ", but only "
                                 + buffer.getMaxRecords() + " are possible!");
             }
-            final ByteBuffer value = ByteBuffer.allocate(8);
-            value.putLong((long) i * Integer.MAX_VALUE + 1);
-            buffer.add(i, value.array(), 0);
+            final byte[] value = new byte[valueSize];
+            ThreadLocalRandom.current().nextBytes(value);
+            buffer.add(i, value, 0);
+            expectedMap.put(i, value);
         }
 
         final Enumeration<ByteBuffer> iterator = buffer.iterator();
@@ -203,8 +234,9 @@ class BufferTest {
         while (iterator.hasMoreElements()) {
             final ByteBuffer byteBuffer = iterator.nextElement();
             final int key = byteBuffer.getInt();
-            final long value = byteBuffer.getLong();
-            assertEquals((long) key * Integer.MAX_VALUE + 1, value);
+            final byte[] actualValue = new byte[valueSize];
+            byteBuffer.get(actualValue);
+            assertArrayEquals(expectedMap.get(key), actualValue);
             keysReceivedOrder.add(key);
         }
 
@@ -212,7 +244,7 @@ class BufferTest {
 
         final ArrayList<Integer> expectedKeysReceivedOrder = new ArrayList<>();
 
-        for (int i = records - 1; i >= 0; i--) {
+        for (int i = wal ? records - 1 : 0; wal ? i >= 0 : i < records; i += wal ? -1 : 1) {
             expectedKeysReceivedOrder.add(i);
         }
 
