@@ -9,7 +9,6 @@ import gnu.trove.map.hash.TIntIntHashMap;
 import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -53,8 +52,6 @@ public class StormDB {
     private static final String FILE_TYPE_NEXT = ".next";
     private static final String FILE_TYPE_DELETE = ".del";
 
-    protected static final int FOUR_MB = 4 * 1024 * 1024;
-
     /**
      * Key: The actual key within this KV store.
      * <p>
@@ -74,18 +71,11 @@ public class StormDB {
 
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
+    // TODO: 16/07/20 Make sure Threadlocal when GC'd closes open file handles.
     private final ThreadLocal<RandomAccessFileWrapper> walReader = new ThreadLocal<>();
     private final ThreadLocal<RandomAccessFileWrapper> walNextReader = new ThreadLocal<>();
     private final ThreadLocal<RandomAccessFileWrapper> dataReader = new ThreadLocal<>();
     private final ThreadLocal<RandomAccessFileWrapper> dataNextReader = new ThreadLocal<>();
-
-
-    /**
-     * Align to the nearest 4096 block, based on the size of the value. This improves sequential
-     * reads by reading data in bulk. Based on previous performance tests, reading just {@link
-     * #valueSize} bytes at a time is slower.
-     */
-    private final int blockSize;
 
     private final Buffer buffer;
     private long lastBufferFlushTimeMs;
@@ -125,7 +115,6 @@ public class StormDB {
 
         recordSize = valueSize + KEY_SIZE;
 
-        blockSize = (4096 / recordSize) * recordSize;
         buffer = new Buffer(valueSize, false);
         lastBufferFlushTimeMs = System.currentTimeMillis();
 
@@ -161,6 +150,8 @@ public class StormDB {
         setupWorkerThread();
     }
 
+    // TODO: 16/07/20 We cant potentially have 1000 threads if those many instances are open.
+    // Add support for external executor service.
     private void setupWorkerThread() {
         tWorker = new Thread(() -> {
             while (!shutDown) {
@@ -273,6 +264,7 @@ public class StormDB {
 
     }
 
+    // TODO: 16/07/20 Look at https://docs.oracle.com/javase/tutorial/essential/io/fileOps.html#atomic
     private void rename(final File file, final File destination) throws IOException {
         if (file.exists() && !file.renameTo(destination)) {
             throw new IOException("Failed to rename " + file.getAbsolutePath()
@@ -607,9 +599,10 @@ public class StormDB {
 
     private static RandomAccessFileWrapper getReadRandomAccessFile(
             ThreadLocal<RandomAccessFileWrapper> reader,
-            File file) throws FileNotFoundException {
+            File file) throws IOException {
         RandomAccessFileWrapper f = reader.get();
         if (f == null || !f.isSameFile(file)) {
+            // TODO: 16/07/20 Check if we need to call f.close(); for older handle
             f = new RandomAccessFileWrapper(file, "r");
             reader.set(f);
         }

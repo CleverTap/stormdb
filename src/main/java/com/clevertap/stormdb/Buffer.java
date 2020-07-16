@@ -25,6 +25,7 @@ import java.util.zip.CRC32;
  */
 public class Buffer {
 
+    // TODO: 16/07/20 Rename and make this configurable
     protected static final int FOUR_MB = 4 * 1024 * 1024;
 
     /**
