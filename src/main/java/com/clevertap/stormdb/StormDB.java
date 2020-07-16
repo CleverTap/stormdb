@@ -42,6 +42,9 @@ public class StormDB {
     public static final int CRC_SIZE = 4; // CRC32.
     // TODO: 13/07/20 Make it configurable
     private static final long COMPACTION_WAIT_TIMEOUT_MS = (long) 1000 * 60; // 1 minute for now.
+    private static final long BUFFER_FLUSH_TIMEOUT_MS  = (long) 1000 * 60; // 1 minute for now.
+    public static final int MIN_BUFFERS_TO_COMPACT = 8;
+    public static final int DATA_TO_WAL_FILE_RATIO = 10;
 
     protected static final int RESERVED_KEY_MARKER = 0xffffffff;
     private static final int NO_MAPPING_FOUND = 0xffffffff;
@@ -88,6 +91,7 @@ public class StormDB {
     private final int blockSize;
 
     private final Buffer buffer;
+    private long lastBufferFlushTimeMs;
 
     private final int valueSize;
     private final int recordSize;
@@ -103,7 +107,7 @@ public class StormDB {
 
     private DataOutputStream walOut;
 
-    private Thread tCompaction;
+    private Thread tWorker;
     private final Object compactionSync = new Object();
     private final Object compactionLock = new Object();
     private boolean shutDown = false;
@@ -126,6 +130,7 @@ public class StormDB {
 
         blockSize = (4096 / recordSize) * recordSize;
         buffer = new Buffer(valueSize, false, true);
+        lastBufferFlushTimeMs = System.currentTimeMillis();
 
         dataFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA);
         walFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_WAL);
@@ -167,33 +172,66 @@ public class StormDB {
             recover();
         }
 
-        // TODO: 13/07/20 Make auto compaction configurable.
-        if (this.autoCompact) {
-            setupCompactionThread();
-        }
+        setupWorkerThread();
     }
 
-    private void setupCompactionThread() {
-        tCompaction = new Thread(() -> {
+    private void setupWorkerThread() {
+        tWorker = new Thread(() -> {
             while (!shutDown) {
                 try {
                     synchronized (compactionSync) {
                         compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
                     }
-                    if (shouldCompact()) {
+                    if (autoCompact && shouldCompact()) {
+                        LOG.info("Auto Compacting now.");
                         compact();
+                    } else if(shouldFlushBuffer()) {
+                        LOG.info("Flushing buffer to disk on timeout.");
+                        flush();
                     }
                 } catch (InterruptedException | IOException e) { // NOSONAR - there's nothing else that we can do.
                     LOG.error("Compaction failure!", e);
                 }
             }
         });
-        tCompaction.start();
+        tWorker.start();
+    }
+
+    private boolean shouldFlushBuffer() {
+        if(System.currentTimeMillis() - lastBufferFlushTimeMs > BUFFER_FLUSH_TIMEOUT_MS) {
+            return true;
+        }
+        return false;
     }
 
     private boolean shouldCompact() {
-        // TODO: 09/07/20 Decide and add criteria for compaction here.
-        return true;
+        rwLock.readLock().lock();
+        try {
+            if(isWalFileBigEnough(isCompactionInProgress() ? nextWalFile : walFile)) {
+                return true;
+            }
+        } finally {
+            rwLock.readLock().unlock();
+        }
+        return false;
+    }
+
+    private boolean isWalFileBigEnough(File walFile) {
+        if(walFile.exists()) {
+            final long walLength = walFile.length();
+            if(walLength >= MIN_BUFFERS_TO_COMPACT * buffer.capacity()) {
+                if(!dataFile.exists()) {
+                    return true;
+                } else {
+                    // We should compare with data file irrespective of whether compaction is in progress
+                    // It will be an aprox measure during compaction, but we will have to live with that.
+                    if(walFile.length() * DATA_TO_WAL_FILE_RATIO >= dataFile.length()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private void recover() throws IOException {
@@ -335,11 +373,9 @@ public class StormDB {
 
             // 4. Delete old data and wal
             if (walFileToDelete.exists() && !Files.deleteIfExists(walFileToDelete.toPath())) {
-                // TODO: 09/07/20 log error
                 LOG.error("Unable to delete file {}", walFileToDelete.getName());
             }
             if (dataFileToDelete.exists() && !Files.deleteIfExists(dataFileToDelete.toPath())) {
-                // TODO: 09/07/20 log error
                 LOG.warn("Unable to delete file {}", dataFileToDelete.getName());
             }
             LOG.info("Finished compaction.");
@@ -393,10 +429,13 @@ public class StormDB {
         try {
             // TODO: 07/07/2020 Optimisation: if the current key is in the write buffer,
             // TODO: 07/07/2020 don't append, but perform an inplace update
-
             if (buffer.isFull()) {
                 flush();
-                // TODO: 13/07/20 Make a sync.notify call for compaction if needed.
+                // Let compaction thread eval if there is a need for compaction.
+                // If buffer length is too small, it might result in too many calls.
+                synchronized (compactionSync) {
+                    compactionSync.notify();
+                }
             }
 
             // Write to the write buffer.
@@ -427,6 +466,8 @@ public class StormDB {
 
             bytesInWalFile += buffer.flush(walOut);
             buffer.clear();
+
+            lastBufferFlushTimeMs = System.currentTimeMillis();
         } finally {
             rwLock.writeLock().unlock();
         }
@@ -627,7 +668,7 @@ public class StormDB {
             synchronized (compactionSync) {
                 compactionSync.notifyAll();
             }
-            tCompaction.join();
+            tWorker.join();
         }
     }
 }

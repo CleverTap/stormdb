@@ -79,6 +79,10 @@ public class Buffer {
         byteBuffer = ByteBuffer.allocate(writeBufferSize);
     }
 
+    public int capacity() {
+        return byteBuffer.capacity();
+    }
+
     public int getMaxRecords() {
         return maxRecords;
     }
