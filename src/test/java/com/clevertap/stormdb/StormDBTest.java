@@ -123,6 +123,11 @@ class StormDBTest {
     }
 
     @Test
+    void testAutoCompaction() {
+        // TODO: 16/07/20 Check for autocompaction here.
+    }
+
+    @Test
     void testMultiThreaded() throws IOException, InterruptedException, StormDBException {
         final Path path = Files.createTempDirectory("stormdb");
 
