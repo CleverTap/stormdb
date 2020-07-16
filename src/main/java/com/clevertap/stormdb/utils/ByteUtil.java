@@ -1,5 +1,7 @@
 package com.clevertap.stormdb.utils;
 
+import java.util.ArrayDeque;
+
 /**
  * Created by Jude Pereira, at 14:35 on 09/07/2020.
  */
@@ -20,5 +22,30 @@ public class ByteUtil {
                 | ((data[offset + 1] & 0xFF) << 16)
                 | ((data[offset + 2] & 0xFF) << 8)
                 | data[offset + 3] & 0xFF;
+    }
+
+    public static boolean arrayEquals(byte[] primitiveBytes, ArrayDeque<Byte> bytes) {
+        if (bytes == null || primitiveBytes == null) {
+            return false;
+        }
+
+        if (bytes.size() != primitiveBytes.length) {
+            return false;
+        }
+
+        final int[] idx = {0};
+        boolean[] matched = {true};
+
+        bytes.forEach(aByte -> {
+            if (!matched[0]) {
+                return;
+            }
+
+            if (aByte != primitiveBytes[idx[0]++]) {
+                matched[0] = false;
+            }
+        });
+
+        return matched[0];
     }
 }
