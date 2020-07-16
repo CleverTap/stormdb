@@ -3,6 +3,7 @@ package com.clevertap.stormdb;
 import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.clevertap.stormdb.exceptions.StormDBException;
@@ -181,7 +182,7 @@ class StormDBTest {
                 try {
                     final int[] prevKey = {Integer.MIN_VALUE};
                     db.iterate((key, data, offset) -> {
-                        assertTrue(prevKey[0] != key);
+                        assertNotEquals(prevKey[0], key);
                         prevKey[0] = key;
                         final ByteBuffer value = ByteBuffer.wrap(data, offset, valueSize);
                         synchronized (kvCache) {
@@ -256,7 +257,7 @@ class StormDBTest {
     }
 
     @Test
-    public void testMidWayFileDelete() throws IOException {
+    void testMidWayFileDelete() throws IOException {
         // This tests java bug highlighted below. Can remove later.
         // https://stackoverflow.com/questions/991489/file-delete-returns-false-even-though-file-exists-file-canread-file-canw
         final int totalLines = 1000000;
