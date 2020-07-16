@@ -143,7 +143,6 @@ public class StormDB {
         }
 
         initWalOut();
-        bytesInWalFile = walFile.length();
 
         recover();
         buildIndex();
@@ -153,6 +152,7 @@ public class StormDB {
 
     private void initWalOut() throws FileNotFoundException {
         walOut = new DataOutputStream(new FileOutputStream(walFile, true));
+        bytesInWalFile = walFile.length();
     }
 
     // TODO: 16/07/20 We cant potentially have 1000 threads if those many instances are open.
