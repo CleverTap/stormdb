@@ -118,8 +118,8 @@ public class StormDB {
         buffer = new Buffer(valueSize, false);
         lastBufferFlushTimeMs = System.currentTimeMillis();
 
-        dataFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA);
-        walFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_WAL);
+        dataFile = new File(dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_DATA);
+        walFile = new File(dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_WAL);
 
         // Open DB.
         final File metaFile = new File(dbDir + "/meta");
@@ -225,7 +225,7 @@ public class StormDB {
         // If the database was shutdown during a compaction, delete data.next,
         // and append wal.next to wal.
         final File nextWalFile = new File(dbDirFile.getAbsolutePath()
-                + File.pathSeparator + FILE_NAME_WAL + FILE_TYPE_NEXT);
+                + File.separator + FILE_NAME_WAL + FILE_TYPE_NEXT);
 
         boolean nextWalFileDeleted = false;
 
@@ -241,7 +241,7 @@ public class StormDB {
         // means that just towards the end of the last compaction, the nextWalFile was deleted,
         // but the rename of next data file failed. Don't delete, but simply treat the next data
         // as a part of the WAL file.
-        final File nextDataFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
+        final File nextDataFile = new File(dbDirFile.getAbsolutePath() + File.separator +
                 FILE_NAME_DATA + FILE_TYPE_NEXT);
 
         if (nextDataFile.exists() && !nextWalFileDeleted) {
@@ -303,7 +303,7 @@ public class StormDB {
                 dataInNextFile = new BitSet();
                 dataInNextWalFile = new BitSet();
 
-                nextWalFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
+                nextWalFile = new File(dbDirFile.getAbsolutePath() + File.separator +
                         FILE_NAME_WAL + FILE_TYPE_NEXT);
 
                 // Create new walOut File
@@ -319,7 +319,7 @@ public class StormDB {
 
             // 2. Process wal.current file and out to data.next file.
             // 3. Process data.current file.
-            nextDataFile = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
+            nextDataFile = new File(dbDirFile.getAbsolutePath() + File.separator +
                     FILE_NAME_DATA + FILE_TYPE_NEXT);
 
             try (final BufferedOutputStream out =
@@ -341,9 +341,9 @@ public class StormDB {
                 }
             }
 
-            File walFileToDelete = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
+            File walFileToDelete = new File(dbDirFile.getAbsolutePath() + File.separator +
                     FILE_NAME_WAL + FILE_TYPE_DELETE);
-            File dataFileToDelete = new File(dbDirFile.getAbsolutePath() + File.pathSeparator +
+            File dataFileToDelete = new File(dbDirFile.getAbsolutePath() + File.separator +
                     FILE_NAME_DATA + FILE_TYPE_DELETE);
 
             rwLock.writeLock().lock();
@@ -360,11 +360,11 @@ public class StormDB {
                 // Create new file references for Thread locals to be aware of.
                 // Rename *.next to *.current
                 walFile = new File(
-                        dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_WAL);
+                        dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_WAL);
                 rename(nextWalFile, walFile);
                 nextWalFile = null;
                 dataFile = new File(
-                        dbDirFile.getAbsolutePath() + File.pathSeparator + FILE_NAME_DATA);
+                        dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_DATA);
                 rename(nextDataFile, dataFile);
                 nextDataFile = null;
             } finally {
