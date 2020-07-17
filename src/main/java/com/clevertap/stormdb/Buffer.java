@@ -253,11 +253,15 @@ public class Buffer {
         byteBuffer.putInt((int) crc32.getValue());
     }
 
+    public static byte[] getSyncMarker(final int valueSize) {
+        final ByteBuffer syncMarker = ByteBuffer.allocate(valueSize + KEY_SIZE);
+        Arrays.fill(syncMarker.array(), (byte) 0xFF);
+        syncMarker.putInt(RESERVED_KEY_MARKER);  // This will override the first four bytes.
+        return syncMarker.array();
+    }
+
     protected void insertSyncMarker() {
-        final byte[] bytes = new byte[valueSize];
-        Arrays.fill(bytes, (byte) 0xFF);
-        byteBuffer.putInt(RESERVED_KEY_MARKER);
-        byteBuffer.put(bytes);
+        byteBuffer.put(getSyncMarker(valueSize));
     }
 
     public void clear() {

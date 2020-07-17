@@ -9,6 +9,7 @@ import gnu.trove.map.hash.TIntIntHashMap;
 import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -138,13 +139,17 @@ public class StormDB {
             Files.write(metaFile.toPath(), out.array());
         }
 
-        walOut = new DataOutputStream(new FileOutputStream(walFile, true));
-        bytesInWalFile = walFile.length();
+        initWalOut();
 
         recover();
         buildIndex();
 
         setupWorkerThread();
+    }
+
+    private void initWalOut() throws FileNotFoundException {
+        walOut = new DataOutputStream(new FileOutputStream(walFile, true));
+        bytesInWalFile = walFile.length();
     }
 
     // TODO: 16/07/20 We cant potentially have 1000 threads if those many instances are open.
@@ -251,15 +256,15 @@ public class StormDB {
         }
 
         // Let's run a sequential scan and verify the two files.
-        verifyDatabaseIntegrity();
-    }
+        {
+            final File verifiedWalFile = BlockUtil.verifyBlocks(walFile, valueSize);
+            if (verifiedWalFile != walFile) {
+                walFile = verifiedWalFile;
+                initWalOut();
+            }
+        }
 
-    /**
-     * Ensures that all blocks in the data and the WAL file match their CRC32 checksums. If they
-     * don't, reconstruct the file with only valid blocks.
-     */
-    private void verifyDatabaseIntegrity() {
-
+        dataFile = BlockUtil.verifyBlocks(dataFile, valueSize);
     }
 
     // TODO: 16/07/20 Look at https://docs.oracle.com/javase/tutorial/essential/io/fileOps.html#atomic
