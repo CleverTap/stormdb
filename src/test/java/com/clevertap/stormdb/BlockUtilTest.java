@@ -83,6 +83,8 @@ class BlockUtilTest {
         final int blockSize = StormDB.RECORDS_PER_BLOCK * recordSize
                 + StormDB.CRC_SIZE + recordSize;
 
+        int bytesWritten = 0;
+
         try (final FileOutputStream out = new FileOutputStream(tempFile)) {
             final Buffer buffer = new Buffer(valueSize, false);
             for (int i = 0; i < blocks; i++) {
@@ -101,14 +103,18 @@ class BlockUtilTest {
                 }
 
                 out.write(garbage);
+                bytesWritten += garbage.length;
             }
             if (incompleteLastBlock) {
                 if (expectedBlock.toByteArray().length > 0) {
-                    out.write(expectedBlock.toByteArray(), 0,
-                            expectedBlock.toByteArray().length - blockSize / 2);
+                    final int len = expectedBlock.toByteArray().length - blockSize / 2;
+                    out.write(expectedBlock.toByteArray(), 0, len);
+                    bytesWritten += len;
                 }
             } else {
-                out.write(expectedBlock.toByteArray());
+                final byte[] data = expectedBlock.toByteArray();
+                out.write(data);
+                bytesWritten += data.length;
             }
             if (addTrailingGarbage) {
                 final byte[] garbage = new byte[3000];
@@ -118,14 +124,15 @@ class BlockUtilTest {
                 }
 
                 out.write(garbage);
+                bytesWritten += garbage.length;
             }
 
             out.flush();
         }
 
-        // Sleep to let the kernel flush data. If we don't do this,
-        // then some tests fail sporadically
-        Thread.sleep(10);
+        while (tempFile.length() != bytesWritten) {
+            // Just wait to ack that the fs has all the bytes flushed.
+        }
 
         final File recovered = BlockUtil.verifyBlocks(tempFile, valueSize);
 
