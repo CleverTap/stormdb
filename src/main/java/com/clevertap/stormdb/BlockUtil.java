@@ -63,7 +63,7 @@ public class BlockUtil {
                             // Rewind the file so that we find the next sync marker.
                             // Rewind such that we can find the next sync marker starting
                             // from the first byte of the last sync marker.
-                            in.seek(in.getFilePointer() - data.length - syncMarker.length + 1);
+                            in.seek(in.getFilePointer() - data.length - syncMarker.length - 4 + 1);
                             syncMarkerBuffer.clear();
                             continue;
                         }
