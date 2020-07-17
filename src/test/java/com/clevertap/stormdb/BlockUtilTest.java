@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -45,27 +44,19 @@ class BlockUtilTest {
     private static Stream<Arguments> provideRecoveryCases() {
         final Builder<Arguments> builder = Stream.builder();
 
-        for (int i = 0; i < 100; i++) {
-            for (boolean addTrailingGarbage : new boolean[]{true, false}) {
-                for (boolean incompleteLastBlock : new boolean[]{true, false}) {
-                    for (boolean addGarbageHeader : new boolean[]{true, false}) {
-                        for (boolean randomizeGarbage : new boolean[]{true, false}) {
-                            builder.add(Arguments
-                                    .of(0, addTrailingGarbage, incompleteLastBlock,
-                                            addGarbageHeader,
-                                            randomizeGarbage));
-                            builder.add(Arguments
-                                    .of(1, addTrailingGarbage, incompleteLastBlock,
-                                            addGarbageHeader,
-                                            randomizeGarbage));
-                            builder.add(Arguments
-                                    .of(2, addTrailingGarbage, incompleteLastBlock,
-                                            addGarbageHeader,
-                                            randomizeGarbage));
-                            builder.add(Arguments
-                                    .of(10, addTrailingGarbage, incompleteLastBlock,
-                                            addGarbageHeader,
-                                            randomizeGarbage));
+        for (boolean addTrailingGarbage : new boolean[]{true, false}) {
+            for (boolean incompleteLastBlock : new boolean[]{true, false}) {
+                for (boolean addGarbageHeader : new boolean[]{true, false}) {
+                    for (boolean randomizeGarbage : new boolean[]{true, false}) {
+                        for (boolean corruptEveryAlternateBlock : new boolean[]{true, false}) {
+                            for (int blocks : new int[]{0, 1, 2, 10, 64, 128}) {
+                                for (int valueSize : new int[]{1, 8, 16, 32, 64, 128}) {
+                                    builder.add(Arguments.of(blocks,
+                                            addTrailingGarbage, incompleteLastBlock,
+                                            addGarbageHeader, randomizeGarbage,
+                                            corruptEveryAlternateBlock, valueSize));
+                                }
+                            }
                         }
                     }
                 }
@@ -79,15 +70,15 @@ class BlockUtilTest {
     @MethodSource("provideRecoveryCases")
     void verifyBlockRecoveryWithRandomDataBeforeAndAfter(final int blocks,
             final boolean addTrailingGarbage, final boolean incompleteLastBlock,
-            final boolean addGarbageHeader, final boolean randomizeGarbage)
-            throws IOException {
+            final boolean addGarbageHeader, final boolean randomizeGarbage,
+            final boolean corruptEveryAlternateBlock, final int valueSize)
+            throws IOException, InterruptedException {
         final ByteArrayOutputStream expectedBlock = new ByteArrayOutputStream();
 
         final Path tempPath = Files.createTempFile("stormdb_", "_block_util");
         final File tempFile = tempPath.toFile();
         tempFile.deleteOnExit();
 
-        final int valueSize = 100;
         final int recordSize = valueSize + StormDB.KEY_SIZE;
         final int blockSize = StormDB.RECORDS_PER_BLOCK * recordSize
                 + StormDB.CRC_SIZE + recordSize;
@@ -128,7 +119,13 @@ class BlockUtilTest {
 
                 out.write(garbage);
             }
+
+            out.flush();
         }
+
+        // Sleep to let the kernel flush data. If we don't do this,
+        // then some tests fail sporadically
+        Thread.sleep(10);
 
         final File recovered = BlockUtil.verifyBlocks(tempFile, valueSize);
 
@@ -147,12 +144,8 @@ class BlockUtilTest {
                 incompleteLastBlock, addGarbageHeader,
                 randomizeGarbage);
 
-        // TODO: 16/07/2020 this appears to be flaky when running it repeatedly 
-//        final byte[] actual = Files.readAllBytes(recovered.toPath());
-        final byte[] actual;
-        final FileInputStream fileInputStream = new FileInputStream(recovered);
-        actual = new byte[(int) recovered.length()];
-        fileInputStream.read(actual);
+        // TODO: 16/07/2020 this appears to be flaky when running it repeatedly
+        final byte[] actual = Files.readAllBytes(recovered.toPath());
         if (incompleteLastBlock) {
             final byte[] expectedBytes;
             expectedBytes = new byte[Math.max(blockSize * (blocks - 1), 0)];
