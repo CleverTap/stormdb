@@ -72,7 +72,7 @@ class BlockUtilTest {
             final boolean addTrailingGarbage, final boolean incompleteLastBlock,
             final boolean addGarbageHeader, final boolean randomizeGarbage,
             final boolean corruptEveryAlternateBlock, final int valueSize)
-            throws IOException, InterruptedException {
+            throws IOException {
         final ByteArrayOutputStream expectedBlock = new ByteArrayOutputStream();
 
         final Path tempPath = Files.createTempFile("stormdb_", "_block_util");
@@ -82,8 +82,6 @@ class BlockUtilTest {
         final int recordSize = valueSize + StormDB.KEY_SIZE;
         final int blockSize = StormDB.RECORDS_PER_BLOCK * recordSize
                 + StormDB.CRC_SIZE + recordSize;
-
-        int bytesWritten = 0;
 
         try (final FileOutputStream out = new FileOutputStream(tempFile)) {
             final Buffer buffer = new Buffer(valueSize, false);
@@ -103,18 +101,15 @@ class BlockUtilTest {
                 }
 
                 out.write(garbage);
-                bytesWritten += garbage.length;
             }
             if (incompleteLastBlock) {
                 if (expectedBlock.toByteArray().length > 0) {
                     final int len = expectedBlock.toByteArray().length - blockSize / 2;
                     out.write(expectedBlock.toByteArray(), 0, len);
-                    bytesWritten += len;
                 }
             } else {
                 final byte[] data = expectedBlock.toByteArray();
                 out.write(data);
-                bytesWritten += data.length;
             }
             if (addTrailingGarbage) {
                 final byte[] garbage = new byte[3000];
@@ -124,15 +119,9 @@ class BlockUtilTest {
                 }
 
                 out.write(garbage);
-                bytesWritten += garbage.length;
             }
 
             out.flush();
-        }
-
-        //noinspection StatementWithEmptyBody
-        while (tempFile.length() != bytesWritten) {
-            // Just wait to ack that the fs has all the bytes flushed.
         }
 
         final File recovered = BlockUtil.verifyBlocks(tempFile, valueSize);
