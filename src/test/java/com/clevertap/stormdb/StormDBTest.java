@@ -127,6 +127,30 @@ class StormDBTest {
         // TODO: 16/07/20 Check for autocompaction here.
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 100, 1000, 10_000, 100_000, 1_000_000, 3_000_000})
+    void testBuildIndex(final int totalRecords) throws IOException, InterruptedException, StormDBException {
+        final Path path = Files.createTempDirectory("stormdb");
+        System.out.println(path.toString() + " for " + totalRecords);
+        final int valueSize = 8;
+
+        StormDB db = new StormDB(valueSize, path.toString(), true);
+        final HashMap<Integer, Long> kvCache = new HashMap<>();
+        for (int i = 0; i < totalRecords; i++) {
+            long val = i * 2;
+            final ByteBuffer value = ByteBuffer.allocate(valueSize);
+            value.putLong(val); // Insert a random value.
+            db.put(i, value.array());
+            kvCache.put(i, val);
+        }
+        db.close();
+
+        db = new StormDB(valueSize, path.toString(), false);
+        // Verify here.
+        verifyDb(db, totalRecords, kvCache);
+        db.close();
+    }
+
     @Test
     void testMultiThreaded() throws IOException, InterruptedException, StormDBException {
         final Path path = Files.createTempDirectory("stormdb");

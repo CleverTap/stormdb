@@ -119,14 +119,14 @@ public class Buffer {
     }
 
     public void readFromFiles(List<RandomAccessFile> files,
-            final Consumer<ByteBuffer> recordConsumer, final boolean reverse) throws IOException {
+            final boolean reverse, final Consumer<ByteBuffer> recordConsumer) throws IOException {
         for (RandomAccessFile file : files) {
-            readFromFile(file, recordConsumer, reverse);
+            readFromFile(file, reverse, recordConsumer);
         }
     }
 
-    public void readFromFile(final RandomAccessFile file, final Consumer<ByteBuffer> recordConsumer,
-            final boolean reverse)
+    public void readFromFile(final RandomAccessFile file, final boolean reverse,
+            final Consumer<ByteBuffer> recordConsumer)
             throws IOException {
         final int blockSize = RecordUtil.blockSizeWithTrailer(recordSize);
 

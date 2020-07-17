@@ -282,7 +282,7 @@ class BufferTest {
             if (reverse) {
                 raf.seek(raf.length());
             }
-            tmpBuffer.readFromFile(raf, byteBuffer -> {
+            tmpBuffer.readFromFile(raf, reverse, byteBuffer -> {
                 // Since we're reading from disk, we might hit the same key more than once.
                 // This is due to the fact that the last record in a buffer is duplicated
                 // up to a total of 127 times, to make all blocks in the buffer a multiple
@@ -294,7 +294,7 @@ class BufferTest {
                     dupCheck.set(key);
                     recordConsumer.accept(byteBuffer);
                 }
-            }, reverse);
+            });
         } else {
             final Enumeration<ByteBuffer> iterator = buffer.iterator(reverse);
             while (iterator.hasMoreElements()) {
@@ -333,7 +333,7 @@ class BufferTest {
     @ValueSource(booleans = {true, false})
     void readFromFiles(final boolean reverse) throws IOException {
         final Buffer buffer = Mockito.mock(Buffer.class);
-        doCallRealMethod().when(buffer).readFromFiles(any(), any(), anyBoolean());
+        doCallRealMethod().when(buffer).readFromFiles(any(), anyBoolean(), any());
 
         final ArrayList<RandomAccessFile> files = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
@@ -343,7 +343,7 @@ class BufferTest {
         final Consumer<ByteBuffer> recordConsumer = byteBuffer -> {
         };
 
-        buffer.readFromFiles(files, recordConsumer, reverse);
+        buffer.readFromFiles(files, reverse, recordConsumer);
 
         final ArgumentCaptor<RandomAccessFile> rafCaptor = ArgumentCaptor
                 .forClass(RandomAccessFile.class);
@@ -352,8 +352,8 @@ class BufferTest {
                 .forClass(Consumer.class);
         final ArgumentCaptor<Boolean> reverseCaptor = ArgumentCaptor.forClass(Boolean.class);
 
-        verify(buffer, times(files.size())).readFromFile(rafCaptor.capture(), rcCaptor.capture(),
-                reverseCaptor.capture());
+        verify(buffer, times(files.size())).readFromFile(rafCaptor.capture(), reverseCaptor.capture(),
+                rcCaptor.capture());
 
         for (int i = 0; i < files.size(); i++) {
             assertSame(files.get(i), rafCaptor.getAllValues().get(i));

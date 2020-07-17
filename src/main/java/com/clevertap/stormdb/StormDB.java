@@ -213,8 +213,47 @@ public class StormDB {
         return false;
     }
 
-    private void buildIndex() {
-        // TODO: 15/07/2020
+    private void buildIndex() throws IOException {
+        rwLock.readLock().lock();
+        try {
+            // Iterating data first ensures bitsets are not needed.
+            LOG.info("Building index for the data file.");
+            buildIndexFromFile(false);
+            LOG.info("Building index for the wal file.");
+            buildIndexFromFile(true);
+            LOG.info("Finished building index.");
+        } finally {
+            rwLock.readLock().unlock();
+        }
+    }
+
+    private void buildIndexFromFile(boolean isWal) throws IOException {
+        final Buffer reader = new Buffer(valueSize, true);
+
+        // First figure right file to read.
+        File file;
+        ThreadLocal<RandomAccessFileWrapper> fileReader;
+        if(isWal) {
+            file = walFile;
+            fileReader = walReader;
+        } else {
+            file = dataFile;
+            fileReader = dataReader;
+        }
+
+        if (file.exists()) {
+            final RandomAccessFile walFileReader = getReadRandomAccessFile(fileReader, file);
+            final int[] fileIndex = {0};
+            // Always iterate forward even for wal. In case of wal, entries are overwritten.
+            // A small price to pay for not needing bitsets.
+            reader.readFromFile(walFileReader, false, entry -> {
+                final int key = entry.getInt();
+                index.put(key, fileIndex[0]++);
+                if(isWal) {
+                    dataInWalFile.set(key);
+                }
+            });
+        }
     }
 
     /**
@@ -532,8 +571,8 @@ public class StormDB {
         }
 
         final Buffer reader = new Buffer(valueSize, true);
-        reader.readFromFiles(walFiles, entryConsumer, true);
-        reader.readFromFiles(dataFiles, entryConsumer, false);
+        reader.readFromFiles(walFiles, true, entryConsumer);
+        reader.readFromFiles(dataFiles, false, entryConsumer);
     }
 
     public byte[] randomGet(final int key) throws IOException, StormDBException {
