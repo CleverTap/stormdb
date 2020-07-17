@@ -130,6 +130,7 @@ class BlockUtilTest {
             out.flush();
         }
 
+        //noinspection StatementWithEmptyBody
         while (tempFile.length() != bytesWritten) {
             // Just wait to ack that the fs has all the bytes flushed.
         }
@@ -151,7 +152,6 @@ class BlockUtilTest {
                 incompleteLastBlock, addGarbageHeader,
                 randomizeGarbage);
 
-        // TODO: 16/07/2020 this appears to be flaky when running it repeatedly
         final byte[] actual = Files.readAllBytes(recovered.toPath());
         if (incompleteLastBlock) {
             final byte[] expectedBytes;
