@@ -38,7 +38,7 @@ public class StormDB {
     public static final int CRC_SIZE = 4; // CRC32.
     // TODO: 13/07/20 Make it configurable
     private static final long COMPACTION_WAIT_TIMEOUT_MS = (long) 1000 * 60; // 1 minute for now.
-    private static final long BUFFER_FLUSH_TIMEOUT_MS  = (long) 1000 * 60; // 1 minute for now.
+    private static final long BUFFER_FLUSH_TIMEOUT_MS = (long) 1000 * 60; // 1 minute for now.
     public static final int MIN_BUFFERS_TO_COMPACT = 8;
     public static final int DATA_TO_WAL_FILE_RATIO = 10;
 
@@ -64,10 +64,8 @@ public class StormDB {
             NO_MAPPING_FOUND);
     // TODO: 08/07/20 Revisit bitset memory optimization later.
     // TODO: 14/07/2020 move EVERYTHING for compaction use to a compaction class
-    private long nextFileRecordIndex = 0;
+
     private BitSet dataInWalFile = new BitSet();
-    private BitSet dataInNextFile; // TODO: 09/07/20 We can get rid of this bitset. revisit.
-    private BitSet dataInNextWalFile;
 
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
@@ -86,11 +84,10 @@ public class StormDB {
     private long bytesInWalFile = -1; // Will be initialised on the first write.
     private final File dbDirFile;
     private boolean autoCompact;
+    private CompactionState compactionObject;
 
     private File dataFile;
     private File walFile;
-    private File nextWalFile;
-    private File nextDataFile;
 
     private DataOutputStream walOut;
 
@@ -162,7 +159,7 @@ public class StormDB {
                     if (autoCompact && shouldCompact()) {
                         LOG.info("Auto Compacting now.");
                         compact();
-                    } else if(shouldFlushBuffer()) {
+                    } else if (shouldFlushBuffer()) {
                         LOG.info("Flushing buffer to disk on timeout.");
                         flush();
                     }
@@ -175,7 +172,7 @@ public class StormDB {
     }
 
     private boolean shouldFlushBuffer() {
-        if(System.currentTimeMillis() - lastBufferFlushTimeMs > BUFFER_FLUSH_TIMEOUT_MS) {
+        if (System.currentTimeMillis() - lastBufferFlushTimeMs > BUFFER_FLUSH_TIMEOUT_MS) {
             return true;
         }
         return false;
@@ -184,7 +181,8 @@ public class StormDB {
     private boolean shouldCompact() {
         rwLock.readLock().lock();
         try {
-            if(isWalFileBigEnough(isCompactionInProgress() ? nextWalFile : walFile)) {
+            if (isWalFileBigEnough(
+                    isCompactionInProgress() ? compactionObject.nextWalFile : walFile)) {
                 return true;
             }
         } finally {
@@ -194,15 +192,15 @@ public class StormDB {
     }
 
     private boolean isWalFileBigEnough(File walFile) {
-        if(walFile.exists()) {
+        if (walFile.exists()) {
             final long walLength = walFile.length();
-            if(walLength >= MIN_BUFFERS_TO_COMPACT * buffer.capacity()) {
-                if(!dataFile.exists()) {
+            if (walLength >= MIN_BUFFERS_TO_COMPACT * buffer.capacity()) {
+                if (!dataFile.exists()) {
                     return true;
                 } else {
                     // We should compare with data file irrespective of whether compaction is in progress
                     // It will be an aprox measure during compaction, but we will have to live with that.
-                    if(walFile.length() * DATA_TO_WAL_FILE_RATIO >= dataFile.length()) {
+                    if (walFile.length() * DATA_TO_WAL_FILE_RATIO >= dataFile.length()) {
                         return true;
                     }
                 }
@@ -274,10 +272,11 @@ public class StormDB {
 
     /**
      * This should always be called from synchronized context.
+     *
      * @return If compaction is in progress
      */
     private boolean isCompactionInProgress() {
-        return dataInNextFile != null;
+        return compactionObject != null;
     }
 
     // TODO: 13/07/20 Handle case where compaction takes too long.
@@ -299,19 +298,15 @@ public class StormDB {
                     return;
                 }
 
-                // Now create wal bitset for next file
-                dataInNextFile = new BitSet();
-                dataInNextWalFile = new BitSet();
+                compactionObject = new CompactionState();
 
-                nextWalFile = new File(dbDirFile.getAbsolutePath() + File.separator +
-                        FILE_NAME_WAL + FILE_TYPE_NEXT);
+                compactionObject.nextWalFile = new File(dbDirFile.getAbsolutePath()
+                        + File.separator + FILE_NAME_WAL + FILE_TYPE_NEXT);
 
                 // Create new walOut File
-                walOut = new DataOutputStream(new FileOutputStream(nextWalFile));
+                walOut = new DataOutputStream(new FileOutputStream(compactionObject.nextWalFile));
                 bytesInWalFile = 0;
-                nextFileRecordIndex = 0;
-
-                // TODO: 08/07/20 Remember to invalidate/refresh file handles in thread local
+                compactionObject.nextFileRecordIndex = 0;
 
             } finally {
                 rwLock.writeLock().unlock();
@@ -319,11 +314,11 @@ public class StormDB {
 
             // 2. Process wal.current file and out to data.next file.
             // 3. Process data.current file.
-            nextDataFile = new File(dbDirFile.getAbsolutePath() + File.separator +
+            compactionObject.nextDataFile = new File(dbDirFile.getAbsolutePath() + File.separator +
                     FILE_NAME_DATA + FILE_TYPE_NEXT);
 
             try (final BufferedOutputStream out =
-                    new BufferedOutputStream(new FileOutputStream(nextDataFile),
+                    new BufferedOutputStream(new FileOutputStream(compactionObject.nextDataFile),
                             buffer.getWriteBufferSize())) {
 
                 final Buffer tmpBuffer = new Buffer(valueSize, false);
@@ -353,20 +348,18 @@ public class StormDB {
                 rename(dataFile, dataFileToDelete);
 
                 // Now make bitsets point right.
-                dataInWalFile = dataInNextWalFile;
-                dataInNextFile = null;
-                dataInNextWalFile = null;
+                dataInWalFile = compactionObject.dataInNextWalFile;
 
                 // Create new file references for Thread locals to be aware of.
                 // Rename *.next to *.current
                 walFile = new File(
                         dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_WAL);
-                rename(nextWalFile, walFile);
-                nextWalFile = null;
+                rename(compactionObject.nextWalFile, walFile);
                 dataFile = new File(
                         dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_DATA);
-                rename(nextDataFile, dataFile);
-                nextDataFile = null;
+                rename(compactionObject.nextDataFile, dataFile);
+
+                compactionObject = null;
             } finally {
                 rwLock.writeLock().unlock();
             }
@@ -392,12 +385,12 @@ public class StormDB {
             while (iterator.hasMoreElements()) {
                 final ByteBuffer byteBuffer = iterator.nextElement();
                 final long address = RecordUtil
-                        .indexToAddress(recordSize, nextFileRecordIndex);
-                nextFileRecordIndex++;
+                        .indexToAddress(recordSize, compactionObject.nextFileRecordIndex);
+                compactionObject.nextFileRecordIndex++;
                 final int key = byteBuffer.getInt();
-                if (!dataInNextWalFile.get(key)) {
+                if (!compactionObject.dataInNextWalFile.get(key)) {
                     index.put(key, RecordUtil.addressToIndex(recordSize, address));
-                    dataInNextFile.set(key);
+                    compactionObject.dataInNextFile.set(key);
                 }
             }
         } finally {
@@ -446,7 +439,7 @@ public class StormDB {
             index.put(key, address);
 
             if (isCompactionInProgress()) {
-                dataInNextWalFile.set(key);
+                compactionObject.dataInNextWalFile.set(key);
             } else {
                 dataInWalFile.set(key);
             }
@@ -486,7 +479,8 @@ public class StormDB {
         rwLock.readLock().lock();
         try {
             if (isCompactionInProgress() && useLatestWalFile) {
-                RandomAccessFile reader = getReadRandomAccessFile(walNextReader, nextWalFile);
+                RandomAccessFile reader = getReadRandomAccessFile(walNextReader,
+                        compactionObject.nextWalFile);
                 reader.seek(reader.length());
                 walFiles.add(reader);
             }
@@ -557,17 +551,17 @@ public class StormDB {
 
             value = new byte[valueSize];
 
-            if (isCompactionInProgress() && dataInNextWalFile.get(key)) {
+            if (isCompactionInProgress() && compactionObject.dataInNextWalFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 if (address >= bytesInWalFile) {
                     System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + KEY_SIZE),
                             value, 0, valueSize);
                     return value;
                 }
-                f = getReadRandomAccessFile(walNextReader, nextWalFile);
-            } else if (isCompactionInProgress() && dataInNextFile.get(key)) {
+                f = getReadRandomAccessFile(walNextReader, compactionObject.nextWalFile);
+            } else if (isCompactionInProgress() && compactionObject.dataInNextFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
-                f = getReadRandomAccessFile(dataNextReader, nextDataFile);
+                f = getReadRandomAccessFile(dataNextReader, compactionObject.nextDataFile);
             } else if (dataInWalFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 // If compaction is in progress, we can not read in-memory.
