@@ -6,6 +6,7 @@ import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
 import static com.clevertap.stormdb.StormDB.RESERVED_KEY_MARKER;
 
 import com.clevertap.stormdb.exceptions.ReadOnlyBufferException;
+import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
 import com.clevertap.stormdb.utils.RecordUtil;
 import java.io.IOException;
@@ -130,6 +131,10 @@ public class Buffer {
         final int blockSize = RecordUtil.blockSizeWithTrailer(recordSize);
 
         if (reverse) {
+            if (file.getFilePointer() % blockSize != 0) {
+                throw new StormDBRuntimeException("Inconsistent data for iteration!");
+            }
+
             while (file.getFilePointer() != 0) {
                 byteBuffer.clear();
                 final long validBytesRemaining = file.getFilePointer() - byteBuffer.capacity();

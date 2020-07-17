@@ -3,6 +3,7 @@ package com.clevertap.stormdb;
 import com.clevertap.stormdb.exceptions.InconsistentDataException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import com.clevertap.stormdb.exceptions.StormDBException;
+import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
 import com.clevertap.stormdb.utils.ByteUtil;
 import com.clevertap.stormdb.utils.RecordUtil;
 import gnu.trove.map.hash.TIntIntHashMap;
@@ -64,8 +65,6 @@ public class StormDB {
     private final TIntIntHashMap index = new TIntIntHashMap(100_000, 0.95f, Integer.MAX_VALUE,
             NO_MAPPING_FOUND);
     // TODO: 08/07/20 Revisit bitset memory optimization later.
-    // TODO: 14/07/2020 move EVERYTHING for compaction use to a compaction class
-
     private BitSet dataInWalFile = new BitSet();
 
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
@@ -288,6 +287,8 @@ public class StormDB {
     // TODO: 13/07/20 Handle case where compaction thread keeps failing.
     public void compact() throws IOException {
         synchronized (compactionLock) {
+            final long start = System.currentTimeMillis();
+
             // 1. Move wal to wal.prev and create new wal file.
             rwLock.writeLock().lock();
             try {
@@ -296,7 +297,6 @@ public class StormDB {
                 // buffer to file so that their offsets are honoured.
                 flush();
 
-                // TODO: 10/07/2020 revise message
                 LOG.info("Beginning compaction with bytesInWalFile={}", bytesInWalFile);
                 // Check whether there was any data coming in. If not simply bail out.
                 if (bytesInWalFile == 0) {
@@ -374,9 +374,9 @@ public class StormDB {
                 LOG.error("Unable to delete file {}", walFileToDelete.getName());
             }
             if (dataFileToDelete.exists() && !Files.deleteIfExists(dataFileToDelete.toPath())) {
-                LOG.warn("Unable to delete file {}", dataFileToDelete.getName());
+                LOG.error("Unable to delete file {}", dataFileToDelete.getName());
             }
-            LOG.info("Finished compaction.");
+            LOG.info("Compaction completed successfully in {} ms", System.currentTimeMillis() - start);
         }
     }
 
@@ -490,9 +490,6 @@ public class StormDB {
                 walFiles.add(reader);
             }
 
-            // TODO: 05/07/2020 Keep a mem buffer since a block needs to be flushed fully for backwards iteration.
-            // TODO: 05/07/2020 consider partial writes and alignment
-            // TODO: 05/07/2020 best to ensure that the last 4 bytes are the sync bytes
             if (walFile.exists()) {
                 RandomAccessFile reader = getReadRandomAccessFile(walReader, walFile);
                 reader.seek(walFile.length());
@@ -521,7 +518,7 @@ public class StormDB {
                 try {
                     consumer.accept(key, entry.array(), entry.position());
                 } catch (IOException e) {
-                    // TODO: 13/07/20 Throw custom exception instead.
+                    throw new StormDBRuntimeException(e);
                 }
                 keysRead.set(key);
             }
@@ -533,9 +530,6 @@ public class StormDB {
                 entryConsumer.accept(entry);
             }
         }
-
-        // TODO: 09/07/20 Handle incomplete writes to disk while iteration. Needed esp. while recovery.
-        // TODO: 13/07/2020 send context of data (wal vs data)
 
         final Buffer reader = new Buffer(valueSize, true);
         reader.readFromFiles(walFiles, entryConsumer, true);
