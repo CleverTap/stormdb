@@ -71,9 +71,10 @@ class BlockUtilTest {
     void verifyBlockRecoveryWithRandomDataBeforeAndAfter(final int blocks,
             final boolean addTrailingGarbage, final boolean incompleteLastBlock,
             final boolean addGarbageHeader, final boolean randomizeGarbage,
-            final boolean corruptEveryAlternateBlock, final int valueSize)
+            final boolean addGarbageBetweenEveryBlock, final int valueSize)
             throws IOException {
-        final ByteArrayOutputStream expectedBlock = new ByteArrayOutputStream();
+        final ByteArrayOutputStream corruptedFileContent = new ByteArrayOutputStream();
+        final ByteArrayOutputStream expectedValidBlocks = new ByteArrayOutputStream();
 
         final Path tempPath = Files.createTempFile("stormdb_", "_block_util");
         final File tempFile = tempPath.toFile();
@@ -84,15 +85,6 @@ class BlockUtilTest {
                 + StormDB.CRC_SIZE + recordSize;
 
         try (final FileOutputStream out = new FileOutputStream(tempFile)) {
-            final Buffer buffer = new Buffer(valueSize, false);
-            for (int i = 0; i < blocks; i++) {
-                final byte[] value = new byte[valueSize];
-                ThreadLocalRandom.current().nextBytes(value);
-                buffer.add(1, value, 0);
-                buffer.flush(expectedBlock);
-                buffer.clear();
-            }
-
             if (addGarbageHeader) {
                 final byte[] garbage = new byte[28];
 
@@ -100,17 +92,39 @@ class BlockUtilTest {
                     ThreadLocalRandom.current().nextBytes(garbage);
                 }
 
-                out.write(garbage);
+                corruptedFileContent.write(garbage);
             }
+
+            final Buffer buffer = new Buffer(valueSize, false);
+            for (int i = 0; i < blocks; i++) {
+                final byte[] value = new byte[valueSize];
+                ThreadLocalRandom.current().nextBytes(value);
+                buffer.add(1, value, 0);
+
+                buffer.flush(corruptedFileContent);
+                buffer.flush(expectedValidBlocks);
+                buffer.clear();
+
+                if (addGarbageBetweenEveryBlock) {
+                    final byte[] garbage = new byte[blockSize];
+                    if (randomizeGarbage) {
+                        ThreadLocalRandom.current().nextBytes(garbage);
+                    }
+                    corruptedFileContent.write(garbage);
+                }
+            }
+
             if (incompleteLastBlock) {
-                if (expectedBlock.toByteArray().length > 0) {
-                    final int len = expectedBlock.toByteArray().length - blockSize / 2;
-                    out.write(expectedBlock.toByteArray(), 0, len);
+                if (corruptedFileContent.toByteArray().length > 0) {
+                    final int len = corruptedFileContent.toByteArray().length - blockSize / 2 - (
+                            addGarbageBetweenEveryBlock ? blockSize : 0);
+                    out.write(corruptedFileContent.toByteArray(), 0, Math.max(len, 0));
                 }
             } else {
-                final byte[] data = expectedBlock.toByteArray();
+                final byte[] data = corruptedFileContent.toByteArray();
                 out.write(data);
             }
+
             if (addTrailingGarbage) {
                 final byte[] garbage = new byte[3000];
 
@@ -124,11 +138,13 @@ class BlockUtilTest {
             out.flush();
         }
 
+        final long corruptedFileLength = tempFile.length();
+
         final File recovered = BlockUtil.verifyBlocks(tempFile, valueSize);
 
-        if ((!addGarbageHeader && !addTrailingGarbage && !incompleteLastBlock)
-                || (blocks == 0 && incompleteLastBlock && !addTrailingGarbage
-                && !addGarbageHeader)) {
+        if (corruptedFileLength == 0
+                || (!addGarbageHeader && !addTrailingGarbage
+                && !addGarbageBetweenEveryBlock && !incompleteLastBlock)) {
             assertSame(tempFile, recovered);
         } else {
             assertNotSame(tempFile, recovered);
@@ -145,11 +161,11 @@ class BlockUtilTest {
         if (incompleteLastBlock) {
             final byte[] expectedBytes;
             expectedBytes = new byte[Math.max(blockSize * (blocks - 1), 0)];
-            System.arraycopy(expectedBlock.toByteArray(), 0, expectedBytes, 0,
+            System.arraycopy(expectedValidBlocks.toByteArray(), 0, expectedBytes, 0,
                     expectedBytes.length);
             assertArrayEquals(expectedBytes, actual, message);
         } else {
-            assertArrayEquals(expectedBlock.toByteArray(), actual,
+            assertArrayEquals(expectedValidBlocks.toByteArray(), actual,
                     message);
         }
     }
