@@ -15,9 +15,15 @@ and is not yet ready for production usage.
 - Ability to recover from file corruption
 
 ## Benchmarks
+We ran a small benchmark for 4 byte keys with 28 byte values, and the results are shown below:
+
 <img src="./static/iteration_28_bytes_100m.svg"/>
 <img src="./static/random_28_bytes_100m.svg"/>
-todo: add benchmark page to the wiki on specs
+
+**Note:** We've only compared this with RocksDB since in all our previous benchmarks, 
+we've observed that RocksDB was the fastest.
+
+More details about this benchmark may be found [here](wiki/Blocks).
 
 ## Motivation
 The primary motivation behind StormDB was to achieve fast sequential scans across all keys
