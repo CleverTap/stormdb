@@ -20,6 +20,9 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Enumeration;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
@@ -92,11 +95,18 @@ public class StormDB {
     private DataOutputStream walOut;
 
     private Thread tWorker;
-    private final Object compactionSync = new Object();
+    private Object compactionSync = new Object();
     private final Object compactionLock = new Object();
     private boolean shutDown = false;
+    private boolean useExecutorService = false; // We need this flag if using ES is done mid-way.
 
     private static final Logger LOG = LoggerFactory.getLogger(StormDB.class);
+
+    // Common executor service stuff
+    private static ExecutorService executorService;
+    private static final ArrayList<StormDB> instancesServed = new ArrayList<>();
+    private final static Object commonCompactionSync = new Object();
+    private static boolean esShutDown = false;
 
     public StormDB(int valueSize, String dbDir) throws IOException {
         this(valueSize, dbDir, true);
@@ -146,6 +156,39 @@ public class StormDB {
         setupWorkerThread();
     }
 
+    public static void initExecutorService(int nThreads) {
+        // We will create 1 extra thread to accommodate the poll/wait thread
+        StormDB.executorService = Executors.newFixedThreadPool(nThreads + 1);
+        executorService.submit(() -> {
+            while (!esShutDown) {
+                try {
+                    synchronized (commonCompactionSync) {
+                        commonCompactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
+                    }
+                    synchronized (instancesServed) {
+                        for (StormDB stormDB : instancesServed) {
+                            if (stormDB.autoCompact && stormDB.shouldCompact()) {
+                                LOG.info("Auto Compacting now.");
+                                executorService.submit(() -> {
+                                    try {
+                                        stormDB.compact();
+                                    } catch (IOException e) {
+                                        LOG.error("IOException while compacting - " + e.getMessage());
+                                    }
+                                });
+                            } else if (stormDB.shouldFlushBuffer()) {
+                                LOG.info("Flushing buffer to disk on timeout.");
+                                stormDB.flush();
+                            }
+                        }
+                    }
+                } catch (InterruptedException | IOException e) { // NOSONAR - there's nothing else that we can do.
+                    LOG.error("Compaction failure!", e);
+                }
+            }
+        });
+    }
+
     private void initWalOut() throws FileNotFoundException {
         walOut = new DataOutputStream(new FileOutputStream(walFile, true));
         bytesInWalFile = walFile.length();
@@ -154,25 +197,33 @@ public class StormDB {
     // TODO: 16/07/20 We cant potentially have 1000 threads if those many instances are open.
     // Add support for external executor service.
     private void setupWorkerThread() {
-        tWorker = new Thread(() -> {
-            while (!shutDown) {
-                try {
-                    synchronized (compactionSync) {
-                        compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
+        if(executorService == null) {
+            tWorker = new Thread(() -> {
+                while (!shutDown) {
+                    try {
+                        synchronized (compactionSync) {
+                            compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
+                        }
+                        if (autoCompact && shouldCompact()) {
+                            LOG.info("Auto Compacting now.");
+                            compact();
+                        } else if (shouldFlushBuffer()) {
+                            LOG.info("Flushing buffer to disk on timeout.");
+                            flush();
+                        }
+                    } catch (InterruptedException | IOException e) { // NOSONAR - there's nothing else that we can do.
+                        LOG.error("Compaction failure!", e);
                     }
-                    if (autoCompact && shouldCompact()) {
-                        LOG.info("Auto Compacting now.");
-                        compact();
-                    } else if (shouldFlushBuffer()) {
-                        LOG.info("Flushing buffer to disk on timeout.");
-                        flush();
-                    }
-                } catch (InterruptedException | IOException e) { // NOSONAR - there's nothing else that we can do.
-                    LOG.error("Compaction failure!", e);
                 }
+            });
+            tWorker.start();
+        } else {
+            useExecutorService = true;
+            synchronized (instancesServed) {
+                instancesServed.add(this);
             }
-        });
-        tWorker.start();
+            compactionSync = commonCompactionSync;
+        }
     }
 
     private boolean shouldFlushBuffer() {
@@ -644,11 +695,30 @@ public class StormDB {
     public void close() throws IOException, InterruptedException {
         flush();
         shutDown = true;
-        if (this.autoCompact) {
+        if(useExecutorService) {
+            synchronized (instancesServed) {
+                instancesServed.remove(this);
+            }
+        } else {
             synchronized (compactionSync) {
                 compactionSync.notifyAll();
             }
             tWorker.join();
         }
     }
+
+    public static void shutDownExecutorService() throws InterruptedException {
+        if(executorService != null) {
+            esShutDown = true;
+            synchronized (commonCompactionSync) {
+                commonCompactionSync.notifyAll();
+            }
+            executorService.shutdown();
+            if (!executorService.awaitTermination(5 * 60, TimeUnit.SECONDS)) {
+                LOG.error("Unable to shutdown StormDB executor service in 5 minutes.");
+            }
+            executorService = null;
+        }
+    }
+
 }

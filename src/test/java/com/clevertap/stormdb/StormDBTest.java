@@ -27,7 +27,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 class StormDBTest {
 
     @Test
-    void simpleTest() throws IOException, StormDBException {
+    void simpleTest() throws IOException, StormDBException, InterruptedException {
         final Path path = Files.createTempDirectory("stormdb");
 
         final int valueSize = 28;
@@ -59,6 +59,8 @@ class StormDBTest {
                 assertEquals(key, value.getInt());
             }
         });
+
+        db.close();
     }
 
     @ParameterizedTest
@@ -67,7 +69,8 @@ class StormDBTest {
             RECORDS_PER_BLOCK,
             RECORDS_PER_BLOCK + 1,
             100, 1000, 10_000, 100_000, 200_000, 349_440})
-    void compactionTest(final int totalRecords) throws IOException, StormDBException {
+    void compactionTest(final int totalRecords)
+            throws IOException, StormDBException, InterruptedException {
         final Path path = Files.createTempDirectory("stormdb");
 
         final int valueSize = 8;
@@ -110,6 +113,8 @@ class StormDBTest {
 
         // Make sure all is well
         verifyDb(db, totalRecords, kvCache);
+
+        db.close();
     }
 
     private void verifyDb(StormDB db, int records, HashMap<Integer, Long> kvCache)
@@ -125,6 +130,11 @@ class StormDBTest {
     @Test
     void testAutoCompaction() {
         // TODO: 16/07/20 Check for autocompaction here.
+    }
+
+    @Test
+    void testExecutorService() {
+        // TODO: 20/07/20 Add test for using ES here.
     }
 
     @ParameterizedTest
@@ -272,6 +282,7 @@ class StormDBTest {
         System.out.println("service.awaitTermination for 5 seconds started.");
         service.shutdown();
         assertTrue(service.awaitTermination(5, TimeUnit.SECONDS));
+        db.close();
         assertFalse(exceptionThrown[0]);
     }
 
@@ -308,10 +319,10 @@ class StormDBTest {
             while ((br.readLine()) != null) {
                 if (c++ == totalLines / 2) {
                     file.delete();
-                    System.out.println(c);
                 }
             }
             fr.close();    //closes the stream and release the resources
+            assertEquals(totalLines, c);
         } catch (IOException e) {
             System.out.println("An error occurred.");
             e.printStackTrace();
