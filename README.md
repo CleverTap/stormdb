@@ -15,9 +15,12 @@ and is not yet ready for production usage.
 - Ability to recover from file corruption
 
 ## Benchmarks
-We ran a small benchmark for 4 byte keys with 28 byte values, and the results are shown below:
+We ran a small benchmark for 100 million 4 byte keys with 28 byte values, and the results are shown below:
 
+### Iteration
 <img src="./static/iteration_28_bytes_100m.svg"/>
+
+### Random
 <img src="./static/random_28_bytes_100m.svg"/>
 
 **Note:** We've only compared this with RocksDB since in all our previous benchmarks, 
