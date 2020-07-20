@@ -14,6 +14,11 @@ and is not yet ready for production usage.
 - Affinity to cluster recently updated keys for higher random IO on such keys
 - Ability to recover from file corruption
 
+## Benchmarks
+<img src="./static/iteration_28_bytes_100m.svg"/>
+<img src="./static/random_28_bytes_100m.svg"/>
+todo: add benchmark page to the wiki on specs
+
 ## Motivation
 The primary motivation behind StormDB was to achieve fast sequential scans across all keys
 in the database. When we benchmarked sequential reads of popular key value stores, we realised:
