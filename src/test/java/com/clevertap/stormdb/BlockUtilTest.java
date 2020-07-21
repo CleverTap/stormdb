@@ -25,7 +25,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class BlockUtilTest {
 
     // Create multiple dbConfig for parallel test.
-    private StormDBConfig dbConfig = new StormDBConfig(); // Default dbConfig
+    private final StormDBConfig dbConfig = new StormDBConfig(); // Default dbConfig
 
     @Test
     void verifyBlocksGood() throws IOException {

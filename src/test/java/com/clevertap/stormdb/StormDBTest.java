@@ -151,7 +151,8 @@ class StormDBTest {
 
     @ParameterizedTest
     @ValueSource(ints = {0, 1, 100, 1000, 10_000, 100_000, 1_000_000, 3_000_000})
-    void testBuildIndex(final int totalRecords) throws IOException, InterruptedException, StormDBException {
+    void testBuildIndex(final int totalRecords)
+            throws IOException, InterruptedException, StormDBException {
         final Path path = Files.createTempDirectory("stormdb");
         System.out.println(path.toString() + " for " + totalRecords);
         final int valueSize = 8;
@@ -196,13 +197,13 @@ class StormDBTest {
         final int[] timeToRunInSeconds = {10};
         long[] kvCache = new long[totalRecords];
 
-        final Boolean[] exceptionThrown = { false };
-        final Boolean[] shutdown = { false };
+        final Boolean[] exceptionThrown = {false};
+        final Boolean[] shutdown = {false};
         final ExecutorService service = Executors.newFixedThreadPool(4);
 
         // Writer thread.
         service.submit(() -> {
-            while(!shutdown[0]) {
+            while (!shutdown[0]) {
                 int iterationNumber = 1;
                 for (int i = 0; i < totalRecords; i++) {
                     long val = (i % 1000) * iterationNumber;
@@ -226,7 +227,7 @@ class StormDBTest {
 
         // Compaction thread
         service.submit(() -> {
-            while(!shutdown[0]) {
+            while (!shutdown[0]) {
                 try {
                     db.compact();
                 } catch (IOException e) {
@@ -262,7 +263,7 @@ class StormDBTest {
 
         // Tracker thread
         service.submit(() -> {
-            while(timeToRunInSeconds[0]-- > 0) {
+            while (timeToRunInSeconds[0]-- > 0) {
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException e) {
@@ -311,8 +312,8 @@ class StormDBTest {
 
     private void sleepRandomMs(String caller, int maxMs) {
         try {
-            long sleepTime = (long)(maxMs * Math.random());
-            System.out.println("Sleeping "+caller+" for "+sleepTime+" ms.");
+            long sleepTime = (long) (maxMs * Math.random());
+            System.out.println("Sleeping " + caller + " for " + sleepTime + " ms.");
             Thread.sleep(sleepTime);
         } catch (InterruptedException e) {
             e.printStackTrace();

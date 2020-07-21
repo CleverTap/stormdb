@@ -1,9 +1,9 @@
 package com.clevertap.stormdb;
 
-import static com.clevertap.stormdb.StormDBConfig.CRC_SIZE;
-import static com.clevertap.stormdb.StormDBConfig.RECORDS_PER_BLOCK;
-import static com.clevertap.stormdb.StormDBConfig.KEY_SIZE;
 import static com.clevertap.stormdb.StormDB.RESERVED_KEY_MARKER;
+import static com.clevertap.stormdb.StormDBConfig.CRC_SIZE;
+import static com.clevertap.stormdb.StormDBConfig.KEY_SIZE;
+import static com.clevertap.stormdb.StormDBConfig.RECORDS_PER_BLOCK;
 
 import com.clevertap.stormdb.exceptions.ReadOnlyBufferException;
 import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
@@ -20,9 +20,9 @@ import java.util.function.Consumer;
 import java.util.zip.CRC32;
 
 /**
- * The {@link Buffer} is a logical extension of the WAL file. For a random get, if the index
- * points to an offset greater than that of the actual WAL file, then it's assumed to be in the
- * write buffer.
+ * The {@link Buffer} is a logical extension of the WAL file. For a random get, if the index points
+ * to an offset greater than that of the actual WAL file, then it's assumed to be in the write
+ * buffer.
  */
 public class Buffer {
 

@@ -4,6 +4,7 @@ import java.io.File;
 import java.util.BitSet;
 
 class CompactionState {
+
     long nextFileRecordIndex;
 
     // TODO: 09/07/20 We can get rid of this bitset. revisit.

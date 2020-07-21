@@ -146,7 +146,8 @@ public class StormDB {
             while (!esShutDown) {
                 try {
                     synchronized (commonCompactionSync) {
-                        commonCompactionSync.wait(StormDBConfig.getDefaultCompactionWaitTimeoutMs());
+                        commonCompactionSync
+                                .wait(StormDBConfig.getDefaultCompactionWaitTimeoutMs());
                     }
                     synchronized (instancesServed) {
                         for (StormDB stormDB : instancesServed) {
@@ -156,7 +157,8 @@ public class StormDB {
                                     try {
                                         stormDB.compact();
                                     } catch (IOException e) {
-                                        LOG.error("IOException while compacting - " + e.getMessage());
+                                        LOG.error(
+                                                "IOException while compacting - " + e.getMessage());
                                     }
                                 });
                             } else if (stormDB.shouldFlushBuffer()) {
@@ -180,7 +182,7 @@ public class StormDB {
     // TODO: 16/07/20 We cant potentially have 1000 threads if those many instances are open.
     // Add support for external executor service.
     private void setupWorkerThread() {
-        if(executorService == null) {
+        if (executorService == null) {
             tWorker = new Thread(() -> {
                 while (!shutDown) {
                     try {
@@ -210,10 +212,8 @@ public class StormDB {
     }
 
     private boolean shouldFlushBuffer() {
-        if (System.currentTimeMillis() - lastBufferFlushTimeMs > dbConfig.getBufferFlushTimeoutMs()) {
-            return true;
-        }
-        return false;
+        return System.currentTimeMillis() - lastBufferFlushTimeMs > dbConfig
+                .getBufferFlushTimeoutMs();
     }
 
     private boolean shouldCompact() {
@@ -238,9 +238,7 @@ public class StormDB {
                 } else {
                     // We should compare with data file irrespective of whether compaction is in progress
                     // It will be an aprox measure during compaction, but we will have to live with that.
-                    if (walFile.length() * dbConfig.getDataToWalFileRatio() >= dataFile.length()) {
-                        return true;
-                    }
+                    return walFile.length() * dbConfig.getDataToWalFileRatio() >= dataFile.length();
                 }
             }
         }
@@ -267,7 +265,7 @@ public class StormDB {
         // First figure right file to read.
         File file;
         ThreadLocal<RandomAccessFileWrapper> fileReader;
-        if(isWal) {
+        if (isWal) {
             file = walFile;
             fileReader = walReader;
         } else {
@@ -283,7 +281,7 @@ public class StormDB {
             reader.readFromFile(walFileReader, false, entry -> {
                 final int key = entry.getInt();
                 index.put(key, fileIndex[0]++);
-                if(isWal) {
+                if (isWal) {
                     dataInWalFile.set(key);
                 }
             });
@@ -449,7 +447,8 @@ public class StormDB {
             if (dataFileToDelete.exists() && !Files.deleteIfExists(dataFileToDelete.toPath())) {
                 LOG.error("Unable to delete file {}", dataFileToDelete.getName());
             }
-            LOG.info("Compaction completed successfully in {} ms", System.currentTimeMillis() - start);
+            LOG.info("Compaction completed successfully in {} ms",
+                    System.currentTimeMillis() - start);
         }
     }
 
@@ -626,7 +625,8 @@ public class StormDB {
             if (isCompactionInProgress() && compactionObject.dataInNextWalFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 if (address >= bytesInWalFile) {
-                    System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + StormDBConfig.KEY_SIZE),
+                    System.arraycopy(buffer.array(),
+                            (int) (address - bytesInWalFile + StormDBConfig.KEY_SIZE),
                             value, 0, dbConfig.getValueSize());
                     return value;
                 }
@@ -638,7 +638,8 @@ public class StormDB {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 // If compaction is in progress, we can not read in-memory.
                 if (!isCompactionInProgress() && address >= bytesInWalFile) {
-                    System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + StormDBConfig.KEY_SIZE),
+                    System.arraycopy(buffer.array(),
+                            (int) (address - bytesInWalFile + StormDBConfig.KEY_SIZE),
                             value, 0, dbConfig.getValueSize());
                     return value;
                 }
@@ -678,7 +679,7 @@ public class StormDB {
     public void close() throws IOException, InterruptedException {
         flush();
         shutDown = true;
-        if(useExecutorService) {
+        if (useExecutorService) {
             synchronized (instancesServed) {
                 instancesServed.remove(this);
             }
@@ -691,7 +692,7 @@ public class StormDB {
     }
 
     public static void shutDownExecutorService() throws InterruptedException {
-        if(executorService != null) {
+        if (executorService != null) {
             esShutDown = true;
             synchronized (commonCompactionSync) {
                 commonCompactionSync.notifyAll();

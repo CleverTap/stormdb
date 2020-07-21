@@ -68,7 +68,6 @@ public class BlockUtil {
                             continue;
                         }
 
-
                         out.write(syncMarker);
                         out.write(data);
                         out.writeInt((int) (crc32.getValue()));
@@ -87,7 +86,7 @@ public class BlockUtil {
                     syncMarkerBuffer.add((byte) (data & 0xFF));
                 }
             }
-            
+
             out.flush();
         }
 

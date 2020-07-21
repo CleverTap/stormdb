@@ -6,7 +6,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
-import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.annotations.Benchmark;
+import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
+import org.openjdk.jmh.annotations.Level;
+import org.openjdk.jmh.annotations.Mode;
+import org.openjdk.jmh.annotations.OutputTimeUnit;
+import org.openjdk.jmh.annotations.Param;
+import org.openjdk.jmh.annotations.Scope;
+import org.openjdk.jmh.annotations.Setup;
+import org.openjdk.jmh.annotations.State;
+import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 import org.openjdk.jmh.runner.Runner;
 import org.openjdk.jmh.runner.RunnerException;
@@ -27,7 +37,8 @@ public class StormDBBenchmark {
 
     @State(Scope.Benchmark)
     public static class BenchmarkStateWrite {
-//        @Param({"1000000", "10000000", "100000000"})
+
+        //        @Param({"1000000", "10000000", "100000000"})
         @Param({"8"})
         public int valueSize;
 
@@ -59,6 +70,7 @@ public class StormDBBenchmark {
 
     @State(Scope.Benchmark)
     public static class BenchmarkStateRead {
+
         //        @Param({"1000000", "10000000", "100000000"})
         @Param({"8"})
         public int valueSize;
@@ -88,7 +100,7 @@ public class StormDBBenchmark {
             for (int i = 0; i < maxUserSize; i++) {
                 testValues[i] = new byte[valueSize];
                 random.nextBytes(testValues[i]);
-                randomKeys[i] = (int)(Math.random()*maxUserSize);
+                randomKeys[i] = (int) (Math.random() * maxUserSize);
             }
 
             for (int i = 0; i < maxUserSize; i++) {
@@ -118,7 +130,8 @@ public class StormDBBenchmark {
     @BenchmarkMode(Mode.AverageTime)
     public void dbRead(Blackhole blackhole, BenchmarkStateRead state)
             throws IOException, StormDBException {
-        blackhole.consume(state.db.randomGet(state.randomKeys[Math.abs(state.i++) % state.maxUserSize]));
+        blackhole.consume(
+                state.db.randomGet(state.randomKeys[Math.abs(state.i++) % state.maxUserSize]));
     }
 
     @Fork(value = 1, warmups = 1)

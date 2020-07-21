@@ -51,7 +51,8 @@ import org.mockito.Mockito;
 class BufferTest {
 
     // If we want to parallelize tests, create new dbConfig everytime new buffer is called.
-    private static StormDBConfig dbConfig = new StormDBConfig();
+    private static final StormDBConfig dbConfig = new StormDBConfig();
+
     private static Buffer newBuffer(final int valueSize, final boolean readOnly) {
         dbConfig.valueSize = valueSize;
         return new Buffer(dbConfig, readOnly);
@@ -168,7 +169,8 @@ class BufferTest {
         assertArrayEquals(syncMarkerExpectedValue, syncMarkerActualValue);
 
         // Ensure that nothing else was written.
-        assertEquals(StormDBConfig.RECORDS_PER_BLOCK * recordSize + StormDBConfig.CRC_SIZE + recordSize,
+        assertEquals(
+                StormDBConfig.RECORDS_PER_BLOCK * recordSize + StormDBConfig.CRC_SIZE + recordSize,
                 bytesWritten.capacity());
     }
 
@@ -363,8 +365,9 @@ class BufferTest {
                 .forClass(Consumer.class);
         final ArgumentCaptor<Boolean> reverseCaptor = ArgumentCaptor.forClass(Boolean.class);
 
-        verify(buffer, times(files.size())).readFromFile(rafCaptor.capture(), reverseCaptor.capture(),
-                rcCaptor.capture());
+        verify(buffer, times(files.size()))
+                .readFromFile(rafCaptor.capture(), reverseCaptor.capture(),
+                        rcCaptor.capture());
 
         for (int i = 0; i < files.size(); i++) {
             assertSame(files.get(i), rafCaptor.getAllValues().get(i));

@@ -12,7 +12,8 @@ public class StormDBConfig {
     static final int KEY_SIZE = 4; // Not Configurable for now.
 
     // Compaction parameter defaults
-    private static final long DEFAULT_COMPACTION_WAIT_TIMEOUT_MS = (long) 1000 * 60; // 1 minute for now.
+    private static final long DEFAULT_COMPACTION_WAIT_TIMEOUT_MS =
+            (long) 1000 * 60; // 1 minute for now.
     static final long MIN_COMPACTION_WAIT_TIMEOUT_MS = (long) 1000 * 30; // 1/2 minute for now.
     private static final int DEFAULT_MIN_BUFFERS_TO_COMPACT = 8;
     static final int FLOOR_MIN_BUFFERS_TO_COMPACT = 4; // Min 4 buffers to compact for now
@@ -21,7 +22,8 @@ public class StormDBConfig {
     static final int MAX_DATA_TO_WAL_FILE_RATIO = 100;
 
     // Buffer parameter defaults
-    private static final long DEFAULT_BUFFER_FLUSH_TIMEOUT_MS = (long) 1000 * 60; // 1 minute for now.
+    private static final long DEFAULT_BUFFER_FLUSH_TIMEOUT_MS =
+            (long) 1000 * 60; // 1 minute for now.
     private static final int DEFAULT_MAX_BUFFER_SIZE = 4 * 1024 * 1024;
     /**
      * Theoretically, this can go somewhere up to 15 MB, however, the corresponding buffer size will
@@ -60,8 +62,8 @@ public class StormDBConfig {
     }
 
     /**
-     * @return Compaction wait timeout in msec. With executor service
-     * {@link StormDBConfig#DEFAULT_COMPACTION_WAIT_TIMEOUT_MS} will be used.
+     * @return Compaction wait timeout in msec. With executor service {@link
+     * StormDBConfig#DEFAULT_COMPACTION_WAIT_TIMEOUT_MS} will be used.
      */
     public long getCompactionWaitTimeoutMs() {
         return compactionWaitTimeoutMs;
