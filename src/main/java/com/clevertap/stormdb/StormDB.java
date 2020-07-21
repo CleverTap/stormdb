@@ -1,6 +1,7 @@
 package com.clevertap.stormdb;
 
 import com.clevertap.stormdb.exceptions.InconsistentDataException;
+import com.clevertap.stormdb.exceptions.IncorrectConfigException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import com.clevertap.stormdb.exceptions.StormDBException;
 import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
@@ -120,7 +121,7 @@ public class StormDB {
             final ByteBuffer meta = ByteBuffer.wrap(bytes);
             final int valueSizeFromMeta = meta.getInt();
             if (valueSizeFromMeta != dbConfig.getValueSize()) {
-                throw new IOException("The path " + dbConfig.getDbDir()
+                    throw new IncorrectConfigException("The path " + dbConfig.getDbDir()
                         + " contains a StormDB database with the value size "
                         + valueSizeFromMeta + " bytes. "
                         + "However, " + dbConfig.getValueSize() + " bytes was provided!");

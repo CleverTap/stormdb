@@ -3,8 +3,10 @@ package com.clevertap.stormdb;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.clevertap.stormdb.exceptions.IncorrectConfigException;
 import com.clevertap.stormdb.exceptions.StormDBException;
 import java.io.BufferedReader;
 import java.io.File;
@@ -131,6 +133,23 @@ class StormDBTest {
             final ByteBuffer value = ByteBuffer.wrap(bytes);
             assertEquals(kvCache.get(i), value.getLong());
         }
+    }
+
+    @Test
+    void verifyPersistenceOfValueSize() throws IOException, InterruptedException {
+        final String dbDir = Files.createTempDirectory("storm").toString();
+        final StormDB db = new StormDBBuilder()
+                .withDbDir(dbDir)
+                .withValueSize(8)
+                .build();
+
+        db.close();
+        assertThrows(IncorrectConfigException.class, () ->
+                new StormDBBuilder()
+                        .withDbDir(dbDir)
+                        .withValueSize(16)
+                        .build());
+
     }
 
     @Test
