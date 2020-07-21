@@ -17,6 +17,8 @@ import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Enumeration;
@@ -45,7 +47,6 @@ public class StormDB {
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
     private static final String FILE_TYPE_NEXT = ".next";
-    private static final String FILE_TYPE_DELETE = ".del";
 
     /**
      * Key: The actual key within this KV store.
@@ -76,7 +77,7 @@ public class StormDB {
     private long bytesInWalFile = -1; // Will be initialised on the first write.
     private final File dbDirFile;
     private final StormDBConfig dbConfig;
-    private CompactionState compactionObject;
+    private CompactionState compactionState;
 
     private File dataFile;
     private File walFile;
@@ -220,7 +221,7 @@ public class StormDB {
         rwLock.readLock().lock();
         try {
             if (isWalFileBigEnough(
-                    isCompactionInProgress() ? compactionObject.nextWalFile : walFile)) {
+                    isCompactionInProgress() ? compactionState.nextWalFile : walFile)) {
                 return true;
             }
         } finally {
@@ -337,12 +338,15 @@ public class StormDB {
         dataFile = BlockUtil.verifyBlocks(dataFile, dbConfig.getValueSize());
     }
 
-    // TODO: 16/07/20 Look at https://docs.oracle.com/javase/tutorial/essential/io/fileOps.html#atomic
-    private void rename(final File file, final File destination) throws IOException {
-        if (file.exists() && !file.renameTo(destination)) {
-            throw new IOException("Failed to rename " + file.getAbsolutePath()
-                    + " to " + destination.getAbsolutePath());
-        }
+    /**
+     * Moves a file atomically.
+     *
+     * @return A reference to the destination
+     */
+    private Path move(final File file, final File destination) throws IOException {
+        return Files.move(file.toPath(), destination.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE);
     }
 
     /**
@@ -351,7 +355,7 @@ public class StormDB {
      * @return If compaction is in progress
      */
     private boolean isCompactionInProgress() {
-        return compactionObject != null;
+        return compactionState != null;
     }
 
     // TODO: 13/07/20 Handle case where compaction takes too long.
@@ -374,15 +378,15 @@ public class StormDB {
                     return;
                 }
 
-                compactionObject = new CompactionState();
+                compactionState = new CompactionState();
 
-                compactionObject.nextWalFile = new File(dbDirFile.getAbsolutePath()
+                compactionState.nextWalFile = new File(dbDirFile.getAbsolutePath()
                         + File.separator + FILE_NAME_WAL + FILE_TYPE_NEXT);
 
                 // Create new walOut File
-                walOut = new DataOutputStream(new FileOutputStream(compactionObject.nextWalFile));
+                walOut = new DataOutputStream(new FileOutputStream(compactionState.nextWalFile));
                 bytesInWalFile = 0;
-                compactionObject.nextFileRecordIndex = 0;
+                compactionState.nextFileRecordIndex = 0;
 
             } finally {
                 rwLock.writeLock().unlock();
@@ -390,11 +394,11 @@ public class StormDB {
 
             // 2. Process wal.current file and out to data.next file.
             // 3. Process data.current file.
-            compactionObject.nextDataFile = new File(dbDirFile.getAbsolutePath() + File.separator +
+            compactionState.nextDataFile = new File(dbDirFile.getAbsolutePath() + File.separator +
                     FILE_NAME_DATA + FILE_TYPE_NEXT);
 
             try (final BufferedOutputStream out =
-                    new BufferedOutputStream(new FileOutputStream(compactionObject.nextDataFile),
+                    new BufferedOutputStream(new FileOutputStream(compactionState.nextDataFile),
                             buffer.getWriteBufferSize())) {
 
                 final Buffer tmpBuffer = new Buffer(dbConfig, false);
@@ -412,41 +416,20 @@ public class StormDB {
                 }
             }
 
-            File walFileToDelete = new File(dbDirFile.getAbsolutePath() + File.separator +
-                    FILE_NAME_WAL + FILE_TYPE_DELETE);
-            File dataFileToDelete = new File(dbDirFile.getAbsolutePath() + File.separator +
-                    FILE_NAME_DATA + FILE_TYPE_DELETE);
-
             rwLock.writeLock().lock();
             try {
                 // First rename prevWalFile and prevDataFile so that .next can be renamed
-                rename(walFile, walFileToDelete);
-                rename(dataFile, dataFileToDelete);
+                walFile = move(compactionState.nextWalFile, walFile).toFile();
+                dataFile = move(compactionState.nextDataFile, dataFile).toFile();
 
                 // Now make bitsets point right.
-                dataInWalFile = compactionObject.dataInNextWalFile;
+                dataInWalFile = compactionState.dataInNextWalFile;
 
-                // Create new file references for Thread locals to be aware of.
-                // Rename *.next to *.current
-                walFile = new File(
-                        dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_WAL);
-                rename(compactionObject.nextWalFile, walFile);
-                dataFile = new File(
-                        dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_DATA);
-                rename(compactionObject.nextDataFile, dataFile);
-
-                compactionObject = null;
+                compactionState = null;
             } finally {
                 rwLock.writeLock().unlock();
             }
 
-            // 4. Delete old data and wal
-            if (walFileToDelete.exists() && !Files.deleteIfExists(walFileToDelete.toPath())) {
-                LOG.error("Unable to delete file {}", walFileToDelete.getName());
-            }
-            if (dataFileToDelete.exists() && !Files.deleteIfExists(dataFileToDelete.toPath())) {
-                LOG.error("Unable to delete file {}", dataFileToDelete.getName());
-            }
             LOG.info("Compaction completed successfully in {} ms",
                     System.currentTimeMillis() - start);
         }
@@ -462,12 +445,12 @@ public class StormDB {
             while (iterator.hasMoreElements()) {
                 final ByteBuffer byteBuffer = iterator.nextElement();
                 final long address = RecordUtil
-                        .indexToAddress(recordSize, compactionObject.nextFileRecordIndex);
-                compactionObject.nextFileRecordIndex++;
+                        .indexToAddress(recordSize, compactionState.nextFileRecordIndex);
+                compactionState.nextFileRecordIndex++;
                 final int key = byteBuffer.getInt();
-                if (!compactionObject.dataInNextWalFile.get(key)) {
+                if (!compactionState.dataInNextWalFile.get(key)) {
                     index.put(key, RecordUtil.addressToIndex(recordSize, address));
-                    compactionObject.dataInNextFile.set(key);
+                    compactionState.dataInNextFile.set(key);
                 }
             }
         } finally {
@@ -516,7 +499,7 @@ public class StormDB {
             index.put(key, address);
 
             if (isCompactionInProgress()) {
-                compactionObject.dataInNextWalFile.set(key);
+                compactionState.dataInNextWalFile.set(key);
             } else {
                 dataInWalFile.set(key);
             }
@@ -557,7 +540,7 @@ public class StormDB {
         try {
             if (isCompactionInProgress() && useLatestWalFile) {
                 RandomAccessFile reader = getReadRandomAccessFile(walNextReader,
-                        compactionObject.nextWalFile);
+                        compactionState.nextWalFile);
                 reader.seek(reader.length());
                 walFiles.add(reader);
             }
@@ -622,7 +605,7 @@ public class StormDB {
 
             value = new byte[dbConfig.getValueSize()];
 
-            if (isCompactionInProgress() && compactionObject.dataInNextWalFile.get(key)) {
+            if (isCompactionInProgress() && compactionState.dataInNextWalFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 if (address >= bytesInWalFile) {
                     System.arraycopy(buffer.array(),
@@ -630,10 +613,10 @@ public class StormDB {
                             value, 0, dbConfig.getValueSize());
                     return value;
                 }
-                f = getReadRandomAccessFile(walNextReader, compactionObject.nextWalFile);
-            } else if (isCompactionInProgress() && compactionObject.dataInNextFile.get(key)) {
+                f = getReadRandomAccessFile(walNextReader, compactionState.nextWalFile);
+            } else if (isCompactionInProgress() && compactionState.dataInNextFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
-                f = getReadRandomAccessFile(dataNextReader, compactionObject.nextDataFile);
+                f = getReadRandomAccessFile(dataNextReader, compactionState.nextDataFile);
             } else if (dataInWalFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 // If compaction is in progress, we can not read in-memory.
