@@ -462,7 +462,7 @@ public class StormDB {
     }
 
     public void put(final byte[] key, final byte[] value) throws IOException {
-        put(ByteUtil.toInt(key, 0), value);
+        put(key, value, 0);
     }
 
     public void put(int key, byte[] value) throws IOException {

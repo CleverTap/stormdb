@@ -2,6 +2,7 @@ package com.clevertap.stormdb;
 
 import com.clevertap.stormdb.exceptions.IncorrectConfigException;
 import java.io.IOException;
+import java.nio.file.Path;
 
 public class StormDBBuilder {
 
@@ -73,4 +74,7 @@ public class StormDBBuilder {
         return new StormDB(dbConfig);
     }
 
+    public StormDBBuilder withDbDir(Path path) {
+        return withDbDir(path.toString());
+    }
 }

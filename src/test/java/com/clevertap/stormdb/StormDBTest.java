@@ -1,5 +1,6 @@
 package com.clevertap.stormdb;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -7,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.clevertap.stormdb.exceptions.IncorrectConfigException;
+import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import com.clevertap.stormdb.exceptions.StormDBException;
 import java.io.BufferedReader;
 import java.io.File;
@@ -19,6 +21,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -165,6 +168,39 @@ class StormDBTest {
     @Test
     void testMultipleConfigurations() {
         // TODO: 21/07/20 Add tests for all storm db configurations
+    }
+
+    @Test
+    void put() throws IOException, StormDBException {
+        final StormDB db = new StormDBBuilder()
+                .withDbDir(Files.createTempDirectory("storm"))
+                .withValueSize(8)
+                .build();
+
+        assertThrows(ReservedKeyException.class,
+                () -> db.put(StormDB.RESERVED_KEY_MARKER, new byte[1]));
+
+        final byte[] value = new byte[8];
+        ThreadLocalRandom.current().nextBytes(value);
+
+        db.put(1, value);
+        assertArrayEquals(value, db.randomGet(1));
+
+        final byte[] largeByteArr = new byte[value.length + 100];
+        System.arraycopy(value, 0, largeByteArr, 50, value.length);
+        db.put(2, largeByteArr, 50);
+        assertArrayEquals(value, db.randomGet(2));
+
+        final byte[] key = new byte[4];
+        final ByteBuffer keyBuf = ByteBuffer.wrap(key);
+        keyBuf.putInt(Integer.MAX_VALUE - 200);
+        db.put(key, value);
+        assertArrayEquals(value, db.randomGet(Integer.MAX_VALUE - 200));
+
+        keyBuf.clear();
+        keyBuf.putInt(Integer.MAX_VALUE - 100);
+        db.put(key, largeByteArr, 50);
+        assertArrayEquals(value, db.randomGet(Integer.MAX_VALUE - 100));
     }
 
     @ParameterizedTest
