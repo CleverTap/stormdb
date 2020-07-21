@@ -11,14 +11,18 @@ import java.io.RandomAccessFile;
  */
 public class RandomAccessFileWrapper extends RandomAccessFile {
 
-    private final File fileObject;
+    private final File file;
 
     public RandomAccessFileWrapper(File f, String mode) throws FileNotFoundException {
         super(f, mode);
-        fileObject = f;
+        file = f;
     }
 
     public boolean isSameFile(File f) {
-        return fileObject == f;
+        return file == f;
+    }
+
+    public File getFile() {
+        return file;
     }
 }

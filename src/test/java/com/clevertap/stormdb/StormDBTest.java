@@ -71,7 +71,7 @@ class StormDBTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {0, 1,
+    @ValueSource(ints = {0, 1, 2, 3, 4,
             StormDBConfig.RECORDS_PER_BLOCK - 1,
             StormDBConfig.RECORDS_PER_BLOCK,
             StormDBConfig.RECORDS_PER_BLOCK + 1,
@@ -89,7 +89,6 @@ class StormDBTest {
 
         final HashMap<Integer, Long> kvCache = new HashMap<>();
 
-//        final int totalRecords = 100;
         for (int i = 0; i < totalRecords; i++) {
             long val = (long) (Math.random() * Long.MAX_VALUE);
             final ByteBuffer value = ByteBuffer.allocate(valueSize);

@@ -5,6 +5,7 @@ import com.clevertap.stormdb.exceptions.IncorrectConfigException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import com.clevertap.stormdb.exceptions.StormDBException;
 import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
+import com.clevertap.stormdb.internal.RandomAccessFilePool;
 import com.clevertap.stormdb.utils.ByteUtil;
 import com.clevertap.stormdb.utils.RecordUtil;
 import gnu.trove.map.hash.TIntIntHashMap;
@@ -23,6 +24,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Enumeration;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -64,11 +66,8 @@ public class StormDB {
 
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
-    // TODO: 16/07/20 Make sure Threadlocal when GC'd closes open file handles.
-    private final ThreadLocal<RandomAccessFileWrapper> walReader = new ThreadLocal<>();
-    private final ThreadLocal<RandomAccessFileWrapper> walNextReader = new ThreadLocal<>();
-    private final ThreadLocal<RandomAccessFileWrapper> dataReader = new ThreadLocal<>();
-    private final ThreadLocal<RandomAccessFileWrapper> dataNextReader = new ThreadLocal<>();
+    private final RandomAccessFilePool filePool = new RandomAccessFilePool(
+            10); // TODO: 21/07/2020 parametrise this
 
     private final Buffer buffer;
     private long lastBufferFlushTimeMs;
@@ -260,28 +259,25 @@ public class StormDB {
         final Buffer reader = new Buffer(dbConfig, true);
 
         // First figure right file to read.
-        File file;
-        ThreadLocal<RandomAccessFileWrapper> fileReader;
-        if (isWal) {
-            file = walFile;
-            fileReader = walReader;
-        } else {
-            file = dataFile;
-            fileReader = dataReader;
-        }
+        File file = isWal ? walFile : dataFile;
 
         if (file.exists()) {
-            final RandomAccessFile walFileReader = getReadRandomAccessFile(fileReader, file);
+            final RandomAccessFileWrapper wrapper = filePool.borrowObject(file);
+
             final int[] fileIndex = {0};
             // Always iterate forward even for wal. In case of wal, entries are overwritten.
             // A small price to pay for not needing bitsets.
-            reader.readFromFile(walFileReader, false, entry -> {
-                final int key = entry.getInt();
-                index.put(key, fileIndex[0]++);
-                if (isWal) {
-                    dataInWalFile.set(key);
-                }
-            });
+            try {
+                reader.readFromFile(wrapper, false, entry -> {
+                    final int key = entry.getInt();
+                    index.put(key, fileIndex[0]++);
+                    if (isWal) {
+                        dataInWalFile.set(key);
+                    }
+                });
+            } finally {
+                filePool.returnObject(file, wrapper);
+            }
         }
     }
 
@@ -422,6 +418,7 @@ public class StormDB {
                 dataInWalFile = compactionState.dataInNextWalFile;
 
                 compactionState = null;
+                filePool.clear();
             } finally {
                 rwLock.writeLock().unlock();
             }
@@ -488,9 +485,9 @@ public class StormDB {
             // Write to the write buffer.
             final int addressInBuffer = buffer.add(key, value, valueOffset);
 
-            final int address = RecordUtil.addressToIndex(recordSize,
+            final int recordIndex = RecordUtil.addressToIndex(recordSize,
                     bytesInWalFile + addressInBuffer);
-            index.put(key, address);
+            index.put(key, recordIndex);
 
             if (isCompactionInProgress()) {
                 compactionState.dataInNextWalFile.set(key);
@@ -533,20 +530,21 @@ public class StormDB {
         rwLock.readLock().lock();
         try {
             if (isCompactionInProgress() && useLatestWalFile) {
-                RandomAccessFile reader = getReadRandomAccessFile(walNextReader,
-                        compactionState.nextWalFile);
+                final RandomAccessFileWrapper reader = filePool
+                        .borrowObject(compactionState.nextWalFile);
                 reader.seek(reader.length());
                 walFiles.add(reader);
             }
 
             if (walFile.exists()) {
-                RandomAccessFile reader = getReadRandomAccessFile(walReader, walFile);
-                reader.seek(walFile.length());
+                final RandomAccessFileWrapper reader = filePool.borrowObject(walFile);
+                reader.seek(reader.length());
                 walFiles.add(reader);
             }
 
             if (dataFile.exists()) {
-                RandomAccessFile reader = getReadRandomAccessFile(walReader, dataFile);
+                final RandomAccessFileWrapper reader = filePool.borrowObject(dataFile);
+                reader.seek(0);
                 dataFiles.add(reader);
             }
 
@@ -579,14 +577,34 @@ public class StormDB {
             }
         }
 
+        final Consumer<List<RandomAccessFile>> returnFiles = files -> {
+            for (RandomAccessFile file : files) {
+                assert file instanceof RandomAccessFileWrapper;
+                filePool.returnObject(((RandomAccessFileWrapper) file).getFile(),
+                        (RandomAccessFileWrapper) file);
+            }
+        };
+
         final Buffer reader = new Buffer(dbConfig, true);
-        reader.readFromFiles(walFiles, true, entryConsumer);
-        reader.readFromFiles(dataFiles, false, entryConsumer);
+        try {
+            reader.readFromFiles(walFiles, true, entryConsumer);
+        } catch (Throwable t) {
+            returnFiles.accept(dataFiles);
+            throw t;
+        } finally {
+            returnFiles.accept(walFiles);
+        }
+
+        try {
+            reader.readFromFiles(dataFiles, false, entryConsumer);
+        } finally {
+            returnFiles.accept(dataFiles);
+        }
     }
 
     public byte[] randomGet(final int key) throws IOException, StormDBException {
         int recordIndex;
-        final RandomAccessFile f;
+        final RandomAccessFileWrapper f;
         byte[] value;
         rwLock.readLock().lock();
         final long address;
@@ -606,10 +624,10 @@ public class StormDB {
                             value, 0, dbConfig.getValueSize());
                     return value;
                 }
-                f = getReadRandomAccessFile(walNextReader, compactionState.nextWalFile);
+                f = filePool.borrowObject(compactionState.nextWalFile);
             } else if (isCompactionInProgress() && compactionState.dataInNextFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
-                f = getReadRandomAccessFile(dataNextReader, compactionState.nextDataFile);
+                f = filePool.borrowObject(compactionState.nextDataFile);
             } else if (dataInWalFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 // If compaction is in progress, we can not read in-memory.
@@ -619,37 +637,29 @@ public class StormDB {
                             value, 0, dbConfig.getValueSize());
                     return value;
                 }
-                f = getReadRandomAccessFile(walReader, walFile);
+                f = filePool.borrowObject(walFile);
             } else {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
-                f = getReadRandomAccessFile(dataReader, dataFile);
+                f = filePool.borrowObject(dataFile);
             }
         } finally {
             rwLock.readLock().unlock();
         }
 
-        f.seek(address);
-        if (f.readInt() != key) {
-            throw new InconsistentDataException();
+        try {
+            f.seek(address);
+            if (f.readInt() != key) {
+                throw new InconsistentDataException();
+            }
+            final int bytesRead = f.read(value);
+            if (bytesRead != dbConfig.getValueSize()) {
+                throw new StormDBException("Possible data corruption detected! "
+                        + "Re-open the database for automatic recovery!");
+            }
+            return value;
+        } finally {
+            filePool.returnObject(f.getFile(), f);
         }
-        final int bytesRead = f.read(value);
-        if (bytesRead != dbConfig.getValueSize()) {
-            throw new StormDBException("Possible data corruption detected! "
-                    + "Re-open the database for automatic recovery!");
-        }
-        return value;
-    }
-
-    private static RandomAccessFileWrapper getReadRandomAccessFile(
-            ThreadLocal<RandomAccessFileWrapper> reader,
-            File file) throws IOException {
-        RandomAccessFileWrapper f = reader.get();
-        if (f == null || !f.isSameFile(file)) {
-            // TODO: 16/07/20 Check if we need to call f.close(); for older handle
-            f = new RandomAccessFileWrapper(file, "r");
-            reader.set(f);
-        }
-        return f;
     }
 
     public void close() throws IOException, InterruptedException {
