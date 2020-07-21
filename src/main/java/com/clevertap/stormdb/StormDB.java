@@ -58,7 +58,7 @@ public class StormDB {
     // TODO: 03/07/2020 change this map to one that is array based (saves 1/2 the size)
     private final TIntIntHashMap index = new TIntIntHashMap(100_000, 0.95f, Integer.MAX_VALUE,
             NO_MAPPING_FOUND);
-    // TODO: 08/07/20 Revisit bitset memory optimization later.
+
     private BitSet dataInWalFile = new BitSet();
 
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
@@ -85,7 +85,7 @@ public class StormDB {
     private DataOutputStream walOut;
 
     private Thread tWorker;
-    private Object compactionSync = new Object();
+    private final Object compactionSync;
     private final Object compactionLock = new Object();
     private boolean shutDown = false;
     private boolean useExecutorService = false; // We need this flag if using ES is done mid-way.
@@ -137,7 +137,34 @@ public class StormDB {
         recover();
         buildIndex();
 
-        setupWorkerThread();
+        if (executorService == null) {
+            compactionSync = new Object();
+            tWorker = new Thread(() -> {
+                while (!shutDown) {
+                    try {
+                        synchronized (compactionSync) {
+                            compactionSync.wait(dbConfig.getCompactionWaitTimeoutMs());
+                        }
+                        if (dbConfig.autoCompactEnabled() && shouldCompact()) {
+                            LOG.info("Auto Compacting now.");
+                            compact();
+                        } else if (shouldFlushBuffer()) {
+                            LOG.info("Flushing buffer to disk on timeout.");
+                            flush();
+                        }
+                    } catch (InterruptedException | IOException e) { // NOSONAR - there's nothing else that we can do.
+                        LOG.error("Compaction failure!", e);
+                    }
+                }
+            });
+            tWorker.start();
+        } else {
+            useExecutorService = true;
+            synchronized (instancesServed) {
+                instancesServed.add(this);
+            }
+            compactionSync = commonCompactionSync;
+        }
     }
 
     public static void initExecutorService(int nThreads) {
@@ -178,38 +205,6 @@ public class StormDB {
     private void initWalOut() throws FileNotFoundException {
         walOut = new DataOutputStream(new FileOutputStream(walFile, true));
         bytesInWalFile = walFile.length();
-    }
-
-    // TODO: 16/07/20 We cant potentially have 1000 threads if those many instances are open.
-    // Add support for external executor service.
-    private void setupWorkerThread() {
-        if (executorService == null) {
-            tWorker = new Thread(() -> {
-                while (!shutDown) {
-                    try {
-                        synchronized (compactionSync) {
-                            compactionSync.wait(dbConfig.getCompactionWaitTimeoutMs());
-                        }
-                        if (dbConfig.autoCompactEnabled() && shouldCompact()) {
-                            LOG.info("Auto Compacting now.");
-                            compact();
-                        } else if (shouldFlushBuffer()) {
-                            LOG.info("Flushing buffer to disk on timeout.");
-                            flush();
-                        }
-                    } catch (InterruptedException | IOException e) { // NOSONAR - there's nothing else that we can do.
-                        LOG.error("Compaction failure!", e);
-                    }
-                }
-            });
-            tWorker.start();
-        } else {
-            useExecutorService = true;
-            synchronized (instancesServed) {
-                instancesServed.add(this);
-            }
-            compactionSync = commonCompactionSync;
-        }
     }
 
     private boolean shouldFlushBuffer() {
@@ -480,8 +475,6 @@ public class StormDB {
         rwLock.writeLock().lock();
 
         try {
-            // TODO: 07/07/2020 Optimisation: if the current key is in the write buffer,
-            // TODO: 07/07/2020 don't append, but perform an inplace update
             if (buffer.isFull()) {
                 flush();
                 // Let compaction thread eval if there is a need for compaction.
@@ -567,7 +560,6 @@ public class StormDB {
 
         final Consumer<ByteBuffer> entryConsumer = entry -> {
             final int key = entry.getInt();
-            // TODO: 08/07/2020 if we need to support the whole range of 4 billion keys, we should use a long as the bitset is +ve
             final boolean b = keysRead.get(key);
             if (!b) {
                 try {
