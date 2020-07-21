@@ -1,6 +1,5 @@
 package com.clevertap.stormdb;
 
-import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -31,7 +30,11 @@ class StormDBTest {
         final Path path = Files.createTempDirectory("stormdb");
 
         final int valueSize = 28;
-        final StormDB db = new StormDB(valueSize, path.toString(), false);
+        final StormDB db = new StormDBBuilder()
+                .withDbDir(path.toString())
+                .withValueSize(valueSize)
+                .withAutoCompactDisabled()
+                .build();
 
         final int records = 100;
         for (int i = 0; i < records; i++) {
@@ -65,16 +68,20 @@ class StormDBTest {
 
     @ParameterizedTest
     @ValueSource(ints = {0, 1,
-            RECORDS_PER_BLOCK - 1,
-            RECORDS_PER_BLOCK,
-            RECORDS_PER_BLOCK + 1,
+            StormDBConfig.RECORDS_PER_BLOCK - 1,
+            StormDBConfig.RECORDS_PER_BLOCK,
+            StormDBConfig.RECORDS_PER_BLOCK + 1,
             100, 1000, 10_000, 100_000, 200_000, 349_440})
     void compactionTest(final int totalRecords)
             throws IOException, StormDBException, InterruptedException {
         final Path path = Files.createTempDirectory("stormdb");
 
         final int valueSize = 8;
-        final StormDB db = new StormDB(valueSize, path.toString(), false);
+        final StormDB db = new StormDBBuilder()
+                .withDbDir(path.toString())
+                .withValueSize(valueSize)
+                .withAutoCompactDisabled()
+                .build();
 
         final HashMap<Integer, Long> kvCache = new HashMap<>();
 
@@ -137,6 +144,11 @@ class StormDBTest {
         // TODO: 20/07/20 Add test for using ES here.
     }
 
+    @Test
+    void testMultipleConfigurations() {
+        // TODO: 21/07/20 Add tests for all storm db configurations
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {0, 1, 100, 1000, 10_000, 100_000, 1_000_000, 3_000_000})
     void testBuildIndex(final int totalRecords) throws IOException, InterruptedException, StormDBException {
@@ -144,7 +156,10 @@ class StormDBTest {
         System.out.println(path.toString() + " for " + totalRecords);
         final int valueSize = 8;
 
-        StormDB db = new StormDB(valueSize, path.toString(), true);
+        StormDB db = new StormDBBuilder()
+                .withDbDir(path.toString())
+                .withValueSize(valueSize)
+                .build();
         final HashMap<Integer, Long> kvCache = new HashMap<>();
         for (int i = 0; i < totalRecords; i++) {
             long val = i * 2;
@@ -155,7 +170,11 @@ class StormDBTest {
         }
         db.close();
 
-        db = new StormDB(valueSize, path.toString(), false);
+        db = new StormDBBuilder()
+                .withDbDir(path.toString())
+                .withValueSize(valueSize)
+                .withAutoCompactDisabled()
+                .build();
         // Verify here.
         verifyDb(db, totalRecords, kvCache);
         db.close();
@@ -166,7 +185,11 @@ class StormDBTest {
         final Path path = Files.createTempDirectory("stormdb");
 
         final int valueSize = 8;
-        final StormDB db = new StormDB(valueSize, path.toString(), false);
+        final StormDB db = new StormDBBuilder()
+                .withDbDir(path.toString())
+                .withValueSize(valueSize)
+                .withAutoCompactDisabled()
+                .build();
 
         final int totalRecords = 1_000_000;
         final int maxSleepMs = 100;

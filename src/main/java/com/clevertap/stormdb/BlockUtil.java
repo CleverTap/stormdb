@@ -29,7 +29,7 @@ public class BlockUtil {
 
     private static File rewriteBlocks(final File dirty, final int valueSize) throws IOException {
         LOG.info("Attempting to recover data in {}", dirty);
-        final int recordSize = valueSize + StormDB.KEY_SIZE;
+        final int recordSize = valueSize + StormDBConfig.KEY_SIZE;
         final File newFile = new File(dirty.getParentFile(), dirty.getName() + ".recovered");
 
         final byte[] syncMarker = Buffer.getSyncMarker(valueSize);
@@ -47,7 +47,7 @@ public class BlockUtil {
                     // We're pointing to a sync marker - verify.
                     if (ByteUtil.arrayEquals(syncMarker, syncMarkerBuffer)) {
                         // Start calculating the crc for the next N bytes, and verify.
-                        final byte[] data = new byte[StormDB.RECORDS_PER_BLOCK * recordSize];
+                        final byte[] data = new byte[StormDBConfig.RECORDS_PER_BLOCK * recordSize];
 
                         if (in.read(data) != data.length) {
                             // Corrupted.
@@ -110,7 +110,7 @@ public class BlockUtil {
             return dirty;
         }
 
-        final int recordSize = valueSize + StormDB.KEY_SIZE;
+        final int recordSize = valueSize + StormDBConfig.KEY_SIZE;
 
         final byte[] syncMarker = Buffer.getSyncMarker(valueSize);
 
@@ -130,7 +130,7 @@ public class BlockUtil {
                     // We're pointing to a sync marker - verify.
                     if (ByteUtil.arrayEquals(syncMarker, syncMarkerBuffer)) {
                         // Start calculating the crc for the next N bytes, and verify.
-                        final byte[] data = new byte[StormDB.RECORDS_PER_BLOCK * recordSize];
+                        final byte[] data = new byte[StormDBConfig.RECORDS_PER_BLOCK * recordSize];
 
                         if (in.read(data) != data.length) {
                             // Corrupted.
@@ -164,8 +164,8 @@ public class BlockUtil {
 
             // Validate blocks with file size.
             if (!corrupted) {
-                final long expectedSize = validBlocks * recordSize * StormDB.RECORDS_PER_BLOCK
-                        + (validBlocks * (StormDB.CRC_SIZE + recordSize));
+                final long expectedSize = validBlocks * recordSize * StormDBConfig.RECORDS_PER_BLOCK
+                        + (validBlocks * (StormDBConfig.CRC_SIZE + recordSize));
                 if (expectedSize != dirty.length()) {
                     corrupted = true;
                 }

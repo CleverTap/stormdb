@@ -39,18 +39,8 @@ import org.slf4j.LoggerFactory;
  */
 public class StormDB {
 
-    public static final int RECORDS_PER_BLOCK = 128;
-    public static final int CRC_SIZE = 4; // CRC32.
-    // TODO: 13/07/20 Make it configurable
-    private static final long COMPACTION_WAIT_TIMEOUT_MS = (long) 1000 * 60; // 1 minute for now.
-    private static final long BUFFER_FLUSH_TIMEOUT_MS = (long) 1000 * 60; // 1 minute for now.
-    public static final int MIN_BUFFERS_TO_COMPACT = 8;
-    public static final int DATA_TO_WAL_FILE_RATIO = 10;
-
-    protected static final int RESERVED_KEY_MARKER = 0xffffffff;
+    static final int RESERVED_KEY_MARKER = 0xffffffff;
     private static final int NO_MAPPING_FOUND = 0xffffffff;
-
-    protected static final int KEY_SIZE = 4;
 
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
@@ -81,12 +71,11 @@ public class StormDB {
     private final Buffer buffer;
     private long lastBufferFlushTimeMs;
 
-    private final int valueSize;
     private final int recordSize;
 
     private long bytesInWalFile = -1; // Will be initialised on the first write.
     private final File dbDirFile;
-    private boolean autoCompact;
+    private final StormDBConfig dbConfig;
     private CompactionState compactionObject;
 
     private File dataFile;
@@ -108,43 +97,37 @@ public class StormDB {
     private final static Object commonCompactionSync = new Object();
     private static boolean esShutDown = false;
 
-    public StormDB(int valueSize, String dbDir) throws IOException {
-        this(valueSize, dbDir, true);
-    }
-
-    public StormDB(final int valueSize, final String dbDir, final boolean autoCompact)
-            throws IOException {
-        this.valueSize = valueSize;
-        dbDirFile = new File(dbDir);
-        this.autoCompact = autoCompact;
+    StormDB(final StormDBConfig config) throws IOException {
+        this.dbConfig = config;
+        dbDirFile = new File(dbConfig.getDbDir());
         //noinspection ResultOfMethodCallIgnored
         dbDirFile.mkdirs();
 
-        recordSize = valueSize + KEY_SIZE;
+        recordSize = dbConfig.getValueSize() + StormDBConfig.KEY_SIZE;
 
-        buffer = new Buffer(valueSize, false);
+        buffer = new Buffer(dbConfig, false);
         lastBufferFlushTimeMs = System.currentTimeMillis();
 
         dataFile = new File(dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_DATA);
         walFile = new File(dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_WAL);
 
         // Open DB.
-        final File metaFile = new File(dbDir + "/meta");
+        final File metaFile = new File(dbConfig.getDbDir() + "/meta");
         if (metaFile.exists()) {
             // Ensure that the valueSize has not changed.
             final byte[] bytes = Files.readAllBytes(metaFile.toPath());
             final ByteBuffer meta = ByteBuffer.wrap(bytes);
             final int valueSizeFromMeta = meta.getInt();
-            if (valueSizeFromMeta != valueSize) {
-                throw new IOException("The path " + dbDir
+            if (valueSizeFromMeta != dbConfig.getValueSize()) {
+                throw new IOException("The path " + dbConfig.getDbDir()
                         + " contains a StormDB database with the value size "
                         + valueSizeFromMeta + " bytes. "
-                        + "However, " + valueSize + " bytes was provided!");
+                        + "However, " + dbConfig.getValueSize() + " bytes was provided!");
             }
         } else {
             // New database. Write value size to the meta.
             final ByteBuffer out = ByteBuffer.allocate(4);
-            out.putInt(valueSize);
+            out.putInt(dbConfig.getValueSize());
             Files.write(metaFile.toPath(), out.array());
         }
 
@@ -163,11 +146,11 @@ public class StormDB {
             while (!esShutDown) {
                 try {
                     synchronized (commonCompactionSync) {
-                        commonCompactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
+                        commonCompactionSync.wait(StormDBConfig.getDefaultCompactionWaitTimeoutMs());
                     }
                     synchronized (instancesServed) {
                         for (StormDB stormDB : instancesServed) {
-                            if (stormDB.autoCompact && stormDB.shouldCompact()) {
+                            if (stormDB.dbConfig.autoCompactEnabled() && stormDB.shouldCompact()) {
                                 LOG.info("Auto Compacting now.");
                                 executorService.submit(() -> {
                                     try {
@@ -202,9 +185,9 @@ public class StormDB {
                 while (!shutDown) {
                     try {
                         synchronized (compactionSync) {
-                            compactionSync.wait(COMPACTION_WAIT_TIMEOUT_MS);
+                            compactionSync.wait(dbConfig.getCompactionWaitTimeoutMs());
                         }
-                        if (autoCompact && shouldCompact()) {
+                        if (dbConfig.autoCompactEnabled() && shouldCompact()) {
                             LOG.info("Auto Compacting now.");
                             compact();
                         } else if (shouldFlushBuffer()) {
@@ -227,7 +210,7 @@ public class StormDB {
     }
 
     private boolean shouldFlushBuffer() {
-        if (System.currentTimeMillis() - lastBufferFlushTimeMs > BUFFER_FLUSH_TIMEOUT_MS) {
+        if (System.currentTimeMillis() - lastBufferFlushTimeMs > dbConfig.getBufferFlushTimeoutMs()) {
             return true;
         }
         return false;
@@ -249,13 +232,13 @@ public class StormDB {
     private boolean isWalFileBigEnough(File walFile) {
         if (walFile.exists()) {
             final long walLength = walFile.length();
-            if (walLength >= MIN_BUFFERS_TO_COMPACT * buffer.capacity()) {
+            if (walLength >= dbConfig.getMinBuffersToCompact() * buffer.capacity()) {
                 if (!dataFile.exists()) {
                     return true;
                 } else {
                     // We should compare with data file irrespective of whether compaction is in progress
                     // It will be an aprox measure during compaction, but we will have to live with that.
-                    if (walFile.length() * DATA_TO_WAL_FILE_RATIO >= dataFile.length()) {
+                    if (walFile.length() * dbConfig.getDataToWalFileRatio() >= dataFile.length()) {
                         return true;
                     }
                 }
@@ -279,7 +262,7 @@ public class StormDB {
     }
 
     private void buildIndexFromFile(boolean isWal) throws IOException {
-        final Buffer reader = new Buffer(valueSize, true);
+        final Buffer reader = new Buffer(dbConfig, true);
 
         // First figure right file to read.
         File file;
@@ -346,14 +329,14 @@ public class StormDB {
 
         // Let's run a sequential scan and verify the two files.
         {
-            final File verifiedWalFile = BlockUtil.verifyBlocks(walFile, valueSize);
+            final File verifiedWalFile = BlockUtil.verifyBlocks(walFile, dbConfig.getValueSize());
             if (verifiedWalFile != walFile) {
                 walFile = verifiedWalFile;
                 initWalOut();
             }
         }
 
-        dataFile = BlockUtil.verifyBlocks(dataFile, valueSize);
+        dataFile = BlockUtil.verifyBlocks(dataFile, dbConfig.getValueSize());
     }
 
     // TODO: 16/07/20 Look at https://docs.oracle.com/javase/tutorial/essential/io/fileOps.html#atomic
@@ -416,7 +399,7 @@ public class StormDB {
                     new BufferedOutputStream(new FileOutputStream(compactionObject.nextDataFile),
                             buffer.getWriteBufferSize())) {
 
-                final Buffer tmpBuffer = new Buffer(valueSize, false);
+                final Buffer tmpBuffer = new Buffer(dbConfig, false);
 
                 iterate(false, false, (key, data, offset) -> {
                     tmpBuffer.add(key, data, offset);
@@ -621,7 +604,7 @@ public class StormDB {
             }
         }
 
-        final Buffer reader = new Buffer(valueSize, true);
+        final Buffer reader = new Buffer(dbConfig, true);
         reader.readFromFiles(walFiles, true, entryConsumer);
         reader.readFromFiles(dataFiles, false, entryConsumer);
     }
@@ -638,13 +621,13 @@ public class StormDB {
                 return null; // NOSONAR - returning null is a part of the interface.
             }
 
-            value = new byte[valueSize];
+            value = new byte[dbConfig.getValueSize()];
 
             if (isCompactionInProgress() && compactionObject.dataInNextWalFile.get(key)) {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 if (address >= bytesInWalFile) {
-                    System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + KEY_SIZE),
-                            value, 0, valueSize);
+                    System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + StormDBConfig.KEY_SIZE),
+                            value, 0, dbConfig.getValueSize());
                     return value;
                 }
                 f = getReadRandomAccessFile(walNextReader, compactionObject.nextWalFile);
@@ -655,8 +638,8 @@ public class StormDB {
                 address = RecordUtil.indexToAddress(recordSize, recordIndex);
                 // If compaction is in progress, we can not read in-memory.
                 if (!isCompactionInProgress() && address >= bytesInWalFile) {
-                    System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + KEY_SIZE),
-                            value, 0, valueSize);
+                    System.arraycopy(buffer.array(), (int) (address - bytesInWalFile + StormDBConfig.KEY_SIZE),
+                            value, 0, dbConfig.getValueSize());
                     return value;
                 }
                 f = getReadRandomAccessFile(walReader, walFile);
@@ -673,7 +656,7 @@ public class StormDB {
             throw new InconsistentDataException();
         }
         final int bytesRead = f.read(value);
-        if (bytesRead != valueSize) {
+        if (bytesRead != dbConfig.getValueSize()) {
             // TODO: 03/07/2020 perhaps it's more appropriate to return null (record lost)
             throw new StormDBException("Possible data corruption detected!");
         }

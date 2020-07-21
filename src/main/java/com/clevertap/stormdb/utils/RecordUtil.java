@@ -1,7 +1,7 @@
 package com.clevertap.stormdb.utils;
 
-import static com.clevertap.stormdb.StormDB.CRC_SIZE;
-import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
+import static com.clevertap.stormdb.StormDBConfig.CRC_SIZE;
+import static com.clevertap.stormdb.StormDBConfig.RECORDS_PER_BLOCK;
 
 /**
  * Helper methods to deal with addressing computations.

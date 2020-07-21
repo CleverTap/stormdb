@@ -1,8 +1,6 @@
 package com.clevertap.stormdb;
 
-import static com.clevertap.stormdb.StormDB.CRC_SIZE;
-import static com.clevertap.stormdb.StormDB.KEY_SIZE;
-import static com.clevertap.stormdb.StormDB.RECORDS_PER_BLOCK;
+import static com.clevertap.stormdb.StormDBConfig.KEY_SIZE;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -52,28 +50,39 @@ import org.mockito.Mockito;
  */
 class BufferTest {
 
-    private static Buffer newBuffer(final int valueSize) {
-        return new Buffer(valueSize, false);
+    // If we want to parallelize tests, create new dbConfig everytime new buffer is called.
+    private static StormDBConfig dbConfig = new StormDBConfig();
+    private static Buffer newBuffer(final int valueSize, final boolean readOnly) {
+        dbConfig.valueSize = valueSize;
+        return new Buffer(dbConfig, readOnly);
+    }
+
+    private static Buffer newWriteBuffer(final int valueSize) {
+        return newBuffer(valueSize, false);
+    }
+
+    private static Buffer newReadBuffer(final int valueSize) {
+        return newBuffer(valueSize, true);
     }
 
     @Test
     void checkWriteBufferSize() throws ValueSizeTooLargeException {
         // Small values.
-        assertEquals(4235400, newBuffer(10).getWriteBufferSize());
-        assertEquals(4252897, newBuffer(1).getWriteBufferSize());
-        assertEquals(4229316, newBuffer(36).getWriteBufferSize());
-        assertEquals(4111096, newBuffer(1024).getWriteBufferSize());
+        assertEquals(4235400, newWriteBuffer(10).getWriteBufferSize());
+        assertEquals(4252897, newWriteBuffer(1).getWriteBufferSize());
+        assertEquals(4229316, newWriteBuffer(36).getWriteBufferSize());
+        assertEquals(4111096, newWriteBuffer(1024).getWriteBufferSize());
 
         // Large values have a consequence in memory management.
-        assertEquals(2114056, newBuffer(16 * 1024).getWriteBufferSize());
-        assertEquals(16908808, newBuffer(128 * 1024).getWriteBufferSize());
-        assertEquals(33817096, newBuffer(256 * 1024).getWriteBufferSize());
-        assertEquals(67633672, newBuffer(512 * 1024).getWriteBufferSize());
+        assertEquals(2114056, newWriteBuffer(16 * 1024).getWriteBufferSize());
+        assertEquals(16908808, newWriteBuffer(128 * 1024).getWriteBufferSize());
+        assertEquals(33817096, newWriteBuffer(256 * 1024).getWriteBufferSize());
+        assertEquals(67633672, newWriteBuffer(512 * 1024).getWriteBufferSize());
     }
 
     @Test
     void checkWriteBufferSizeTooLarge() {
-        assertThrows(ValueSizeTooLargeException.class, () -> newBuffer(512 * 1024 + 1));
+        assertThrows(ValueSizeTooLargeException.class, () -> newWriteBuffer(512 * 1024 + 1));
         // TODO: 13/07/2020 add check for verifying that a buffer is set to new after clear
     }
 
@@ -88,7 +97,8 @@ class BufferTest {
 
         final AtomicInteger recordsAdded = new AtomicInteger();
         final AtomicInteger syncMarkersAdded = new AtomicInteger();
-        final Buffer buffer = new Buffer(valueSize, false) {
+        dbConfig.valueSize = valueSize; // Create new dbConfig for parallel tests.
+        final Buffer buffer = new Buffer(dbConfig, false) {
             @Override
             public int add(int key, byte[] value, int valueOffset) {
                 recordsAdded.incrementAndGet();
@@ -123,10 +133,10 @@ class BufferTest {
     void verifyBlockTrailer() throws ValueSizeTooLargeException, IOException {
         final int valueSize = 100;
         final int recordSize = valueSize + KEY_SIZE;
-        final Buffer buffer = new Buffer(valueSize, false);
+        final Buffer buffer = newWriteBuffer(valueSize);
         final CRC32 crc32 = new CRC32();
 
-        for (int i = 0; i < RECORDS_PER_BLOCK; i++) {
+        for (int i = 0; i < StormDBConfig.RECORDS_PER_BLOCK; i++) {
             final byte[] value = new byte[valueSize];
             ThreadLocalRandom.current().nextBytes(value);
             crc32.update(i >> 24);
@@ -143,7 +153,7 @@ class BufferTest {
         final ByteBuffer bytesWritten = ByteBuffer.wrap(out.toByteArray());
 
         // Verify CRC32 checksum.
-        bytesWritten.position(RECORDS_PER_BLOCK * recordSize + recordSize);
+        bytesWritten.position(StormDBConfig.RECORDS_PER_BLOCK * recordSize + recordSize);
         assertNotEquals(0, crc32.getValue());
         assertEquals((int) crc32.getValue(), bytesWritten.getInt());
 
@@ -158,13 +168,13 @@ class BufferTest {
         assertArrayEquals(syncMarkerExpectedValue, syncMarkerActualValue);
 
         // Ensure that nothing else was written.
-        assertEquals(RECORDS_PER_BLOCK * recordSize + CRC_SIZE + recordSize,
+        assertEquals(StormDBConfig.RECORDS_PER_BLOCK * recordSize + StormDBConfig.CRC_SIZE + recordSize,
                 bytesWritten.capacity());
     }
 
     @Test
     void verifyDirty() throws ValueSizeTooLargeException {
-        final Buffer buf = newBuffer(100);
+        final Buffer buf = newWriteBuffer(100);
         assertFalse(buf.isDirty());
         buf.add(10, new byte[100], 0);
         assertTrue(buf.isDirty());
@@ -172,13 +182,13 @@ class BufferTest {
 
     @Test
     void verifyArrayNotNull() throws ValueSizeTooLargeException {
-        final Buffer buf = newBuffer(100);
+        final Buffer buf = newWriteBuffer(100);
         assertNotNull(buf.array());
     }
 
     @Test
     void verifyEmptyFlush() throws ValueSizeTooLargeException, IOException {
-        final Buffer buf = newBuffer(100);
+        final Buffer buf = newWriteBuffer(100);
         final ByteArrayOutputStream out = new ByteArrayOutputStream();
         assertEquals(0, buf.flush(out));
         assertEquals(0, out.size());
@@ -186,7 +196,7 @@ class BufferTest {
 
     @Test
     void verifyFull() throws ValueSizeTooLargeException {
-        final Buffer buf = newBuffer(100);
+        final Buffer buf = newWriteBuffer(100);
         assertFalse(buf.isFull());
 
         for (int i = 0; i < buf.getMaxRecords(); i++) {
@@ -198,7 +208,7 @@ class BufferTest {
 
     @Test
     void clear() {
-        final Buffer buffer = new Buffer(10, false);
+        final Buffer buffer = newWriteBuffer(10);
         final byte[] oldArray = buffer.array();
         buffer.clear();
         assertNotSame(oldArray, buffer.array());
@@ -212,17 +222,18 @@ class BufferTest {
         final Builder<Arguments> builder = Stream.builder();
 
         for (int valueSize : valueSizes) {
+            final Buffer buffer = newWriteBuffer(valueSize);
             final int[] recordsArr = {0, 1,
-                    RECORDS_PER_BLOCK - 1,
-                    RECORDS_PER_BLOCK,
-                    RECORDS_PER_BLOCK + 1,
+                    StormDBConfig.RECORDS_PER_BLOCK - 1,
+                    StormDBConfig.RECORDS_PER_BLOCK,
+                    StormDBConfig.RECORDS_PER_BLOCK + 1,
                     100, 1000, 10_000, 100_000, 200_000,
-                    Buffer.calculateMaxRecords(valueSize)};
+                    buffer.calculateMaxRecords(valueSize)};
 
             for (int records : recordsArr) {
                 for (boolean wal : wals) {
                     for (boolean far : flushAndRead) {
-                        if (records <= Buffer.calculateMaxRecords(valueSize)) {
+                        if (records <= buffer.calculateMaxRecords(valueSize)) {
                             builder.accept(Arguments.of(valueSize, records, wal, far));
                             builder.accept(Arguments.of(valueSize, records, wal, far));
                         }
@@ -241,7 +252,7 @@ class BufferTest {
     void iterator(final int valueSize, final int records, final boolean reverse,
             final boolean flushAndReadFromFile)
             throws ValueSizeTooLargeException, IOException {
-        final Buffer buffer = new Buffer(valueSize, false);
+        final Buffer buffer = newWriteBuffer(valueSize);
 
         final HashMap<Integer, byte[]> expectedMap = new HashMap<>();
 
@@ -277,7 +288,7 @@ class BufferTest {
             buffer.flush(out);
             out.flush();
             out.close();
-            final Buffer tmpBuffer = new Buffer(valueSize, true);
+            final Buffer tmpBuffer = newReadBuffer(valueSize);
             final RandomAccessFile raf = new RandomAccessFile(tmpFile, "r");
             if (reverse) {
                 raf.seek(raf.length());
@@ -317,13 +328,13 @@ class BufferTest {
 
     @Test
     void addReadOnly() {
-        final Buffer buffer = new Buffer(10, true);
+        final Buffer buffer = newReadBuffer(10);
         assertThrows(ReadOnlyBufferException.class, () -> buffer.add(0, new byte[10], 0));
     }
 
     @Test
     void flushReadOnly() {
-        final Buffer buffer = new Buffer(10, true);
+        final Buffer buffer = newReadBuffer(10);
         final ByteArrayOutputStream out = new ByteArrayOutputStream();
         assertThrows(ReadOnlyBufferException.class,
                 () -> buffer.flush(out));

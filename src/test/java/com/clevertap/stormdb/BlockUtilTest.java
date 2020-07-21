@@ -24,9 +24,13 @@ import org.junit.jupiter.params.provider.MethodSource;
  */
 class BlockUtilTest {
 
+    // Create multiple dbConfig for parallel test.
+    private StormDBConfig dbConfig = new StormDBConfig(); // Default dbConfig
+
     @Test
     void verifyBlocksGood() throws IOException {
-        final Buffer buffer = new Buffer(100, false);
+        dbConfig.valueSize = 100;
+        final Buffer buffer = new Buffer(dbConfig, false);
         buffer.add(1, new byte[100], 0);
 
         final Path tempPath = Files.createTempFile("stormdb_", "_block_util");
@@ -80,9 +84,9 @@ class BlockUtilTest {
         final File tempFile = tempPath.toFile();
         tempFile.deleteOnExit();
 
-        final int recordSize = valueSize + StormDB.KEY_SIZE;
-        final int blockSize = StormDB.RECORDS_PER_BLOCK * recordSize
-                + StormDB.CRC_SIZE + recordSize;
+        final int recordSize = valueSize + StormDBConfig.KEY_SIZE;
+        final int blockSize = StormDBConfig.RECORDS_PER_BLOCK * recordSize
+                + StormDBConfig.CRC_SIZE + recordSize;
 
         try (final FileOutputStream out = new FileOutputStream(tempFile)) {
             if (addGarbageHeader) {
@@ -95,7 +99,8 @@ class BlockUtilTest {
                 corruptedFileContent.write(garbage);
             }
 
-            final Buffer buffer = new Buffer(valueSize, false);
+            dbConfig.valueSize = valueSize;
+            final Buffer buffer = new Buffer(dbConfig, false);
             for (int i = 0; i < blocks; i++) {
                 final byte[] value = new byte[valueSize];
                 ThreadLocalRandom.current().nextBytes(value);

@@ -42,7 +42,10 @@ public class StormDBBenchmark {
         @Setup(Level.Iteration)
         public void setUp() throws IOException {
             final Path path = Files.createTempDirectory("stormdb");
-            db = new StormDB(valueSize, path.toString(), true);
+            db = new StormDBBuilder()
+                    .withDbDir(path.toString())
+                    .withValueSize(valueSize)
+                    .build();
             testValues = new byte[maxUserSize][];
             // TODO: 15/07/20 Limit random bytes to a ceiling.
             Random random = new Random();
@@ -73,7 +76,11 @@ public class StormDBBenchmark {
         @Setup(Level.Trial)
         public void setUp() throws IOException {
             final Path path = Files.createTempDirectory("stormdb");
-            db = new StormDB(valueSize, path.toString(), false);
+            db = new StormDBBuilder()
+                    .withDbDir(path.toString())
+                    .withValueSize(valueSize)
+                    .withAutoCompactDisabled()
+                    .build();
             testValues = new byte[maxUserSize][];
             randomKeys = new int[maxUserSize];
             // TODO: 15/07/20 Limit random bytes to a ceiling.
