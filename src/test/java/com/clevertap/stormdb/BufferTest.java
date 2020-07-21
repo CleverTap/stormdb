@@ -18,6 +18,7 @@ import static org.mockito.Mockito.verify;
 
 import com.clevertap.stormdb.exceptions.ReadOnlyBufferException;
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
+import com.clevertap.stormdb.utils.RecordUtil;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -84,10 +85,8 @@ class BufferTest {
     @Test
     void checkWriteBufferSizeTooLarge() {
         assertThrows(ValueSizeTooLargeException.class, () -> newWriteBuffer(512 * 1024 + 1));
-        // TODO: 13/07/2020 add check for verifying that a buffer is set to new after clear
     }
 
-    // TODO: 15/07/2020 add test cases which verify the address returned
     @ParameterizedTest
     @ValueSource(ints = {1, 8, 100})
     void verifyIncompleteBlockPadding(final int valueSize)
@@ -267,7 +266,9 @@ class BufferTest {
             }
             final byte[] value = new byte[valueSize];
             ThreadLocalRandom.current().nextBytes(value);
-            buffer.add(i, value, 0);
+            final int address = buffer.add(i, value, 0);
+            final int recordSize = valueSize + KEY_SIZE;
+            assertEquals(RecordUtil.indexToAddress(recordSize, i), address);
             expectedMap.put(i, value);
         }
 
