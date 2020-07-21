@@ -22,7 +22,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-// TODO: 10/07/2020 test with more than Integer.MAX_VALUE records
 class StormDBTest {
 
     @Test

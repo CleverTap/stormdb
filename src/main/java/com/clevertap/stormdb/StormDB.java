@@ -633,8 +633,8 @@ public class StormDB {
         }
         final int bytesRead = f.read(value);
         if (bytesRead != dbConfig.getValueSize()) {
-            // TODO: 03/07/2020 perhaps it's more appropriate to return null (record lost)
-            throw new StormDBException("Possible data corruption detected!");
+            throw new StormDBException("Possible data corruption detected! "
+                    + "Re-open the database for automatic recovery!");
         }
         return value;
     }
