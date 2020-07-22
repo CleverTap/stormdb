@@ -479,7 +479,7 @@ public class StormDB {
                 // Let compaction thread eval if there is a need for compaction.
                 // If buffer length is too small, it might result in too many calls.
                 synchronized (compactionSync) {
-                    compactionSync.notify();
+                    compactionSync.notifyAll();
                 }
             }
 
@@ -685,7 +685,7 @@ public class StormDB {
                 commonCompactionSync.notifyAll();
             }
             executorService.shutdown();
-            if (!executorService.awaitTermination(5 * 60, TimeUnit.SECONDS)) {
+            if (!executorService.awaitTermination(5L * 60, TimeUnit.SECONDS)) {
                 LOG.error("Unable to shutdown StormDB executor service in 5 minutes.");
             }
             executorService = null;

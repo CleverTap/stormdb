@@ -174,13 +174,16 @@ class StormDBTest {
         }
 
         final long sleepTimeMs = 10;
-        final long numberIterations = config.compactionWaitTimeoutMs * 5 / sleepTimeMs + 1;
-        for (int i = 0; i < numberIterations; i++) {
+        long numberIterations = config.compactionWaitTimeoutMs * 5 / sleepTimeMs + 1;
+        while(numberIterations > 0) {
             Thread.sleep(sleepTimeMs);
             if(isCompactionComplete(config)) {
                 break;
             }
+            numberIterations--;
         }
+
+        assertTrue(numberIterations > 0);
 
         // Make sure all is well
         verifyDb(stormDB, totalRecords, kvCache);
@@ -191,13 +194,16 @@ class StormDBTest {
         File walFile = new File(conf.getDbDir() + File.separator + "wal");
         File nextDataFile = new File(conf.getDbDir() + File.separator + "data.next");
         File nextWalFile = new File(conf.getDbDir() + File.separator + "wal.next");
-
-        try {
-            assertFalse(nextDataFile.exists());
-            assertFalse(nextWalFile.exists());
-            assertEquals(0, walFile.length());
-            assertNotEquals(0, dataFile.length());
-        } catch (AssertionError e) {
+        if(nextDataFile.exists()) {
+            return false;
+        }
+        if(nextWalFile.exists()) {
+            return false;
+        }
+        if(walFile.length() != 0) {
+            return false;
+        }
+        if(dataFile.length() == 0) {
             return false;
         }
         return true;
@@ -475,12 +481,12 @@ class StormDBTest {
                         assertNotEquals(prevKey[0], key);
                         prevKey[0] = key;
                         final ByteBuffer value = ByteBuffer.wrap(data, offset, valueSize);
-                        synchronized (kvCache) {
-                            assertTrue(kvCache[key] >= value.getLong());
+                        if(kvCache[key] < value.getLong()) {
+                            exceptionOrAssertion[1] = true;
                         }
                     });
-                } catch (Throwable t) {
-                    exceptionOrAssertion[1] = true;
+                } catch (Exception t) {
+                    exceptionOrAssertion[0] = true;
                 }
 //                sleepRandomMs("iterate", maxSleepMs);
             }
@@ -512,10 +518,12 @@ class StormDBTest {
                     final ByteBuffer value = ByteBuffer.wrap(bytes);
                     final long longValue = value.getLong();
                     synchronized (kvCache) {
-                        assertTrue(kvCache[i] >= longValue);
+                        if (kvCache[i] < longValue) {
+                            exceptionOrAssertion[1] = true;
+                        }
                     }
-                } catch (Throwable t) {
-                    exceptionOrAssertion[1] = true;
+                } catch (Exception t) {
+                    exceptionOrAssertion[0] = true;
                 }
             }
             sleepRandomMs("verifier", maxSleepMs);
