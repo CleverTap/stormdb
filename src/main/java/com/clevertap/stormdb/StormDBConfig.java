@@ -31,7 +31,12 @@ public class StormDBConfig {
      * <p>
      * Note: The hard limit is due to the fact that {@link ByteBuffer} accepts an int as its size.
      */
-    public static final int MAX_VALUE_SIZE = 512 * 1024; // Not configurable for now.
+    static final int MAX_VALUE_SIZE = 512 * 1024; // Not configurable for now.
+
+    // File open fd parameter defaults and range
+    private static final int DEFAULT_OPEN_FD_COUNT = 10;
+    static final int MIN_OPEN_FD_COUNT = 1;
+    static final int MAX_OPEN_FD_COUNT = 100;
 
     // Must have parameters
     boolean autoCompact = true;
@@ -44,6 +49,7 @@ public class StormDBConfig {
     int dataToWalFileRatio = DEFAULT_DATA_TO_WAL_FILE_RATIO;
     long bufferFlushTimeoutMs = DEFAULT_BUFFER_FLUSH_TIMEOUT_MS;
     int maxBufferSize = DEFAULT_MAX_BUFFER_SIZE;
+    int openFDCount = DEFAULT_OPEN_FD_COUNT;
 
     public boolean autoCompactEnabled() {
         return autoCompact;
@@ -83,6 +89,10 @@ public class StormDBConfig {
 
     public int getMaxBufferSize() {
         return maxBufferSize;
+    }
+
+    public int getOpenFDCount() {
+        return openFDCount;
     }
 
 }

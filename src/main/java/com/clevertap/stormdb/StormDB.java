@@ -66,8 +66,7 @@ public class StormDB {
 
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
-    private final RandomAccessFilePool filePool = new RandomAccessFilePool(
-            10); // TODO: 21/07/2020 parametrise this
+    private final RandomAccessFilePool filePool;
 
     private final Buffer buffer;
     private long lastBufferFlushTimeMs;
@@ -108,6 +107,8 @@ public class StormDB {
 
         buffer = new Buffer(dbConfig, false);
         lastBufferFlushTimeMs = System.currentTimeMillis();
+
+        filePool = new RandomAccessFilePool(dbConfig.getOpenFDCount());
 
         dataFile = new File(dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_DATA);
         walFile = new File(dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_WAL);

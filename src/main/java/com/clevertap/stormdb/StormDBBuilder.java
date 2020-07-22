@@ -48,6 +48,15 @@ public class StormDBBuilder {
         return this;
     }
 
+    public StormDBBuilder withDbDir(Path path) {
+        return withDbDir(path.toString());
+    }
+
+    public StormDBBuilder withCustomOpenFDCount(int openFDCount) {
+        dbConfig.openFDCount = openFDCount;
+        return this;
+    }
+
     public StormDB build() throws IOException {
         if (dbConfig.dbDir == null || dbConfig.dbDir.isEmpty()) {
             throw new IncorrectConfigException("StormDB directory cannot be empty or null.");
@@ -71,10 +80,15 @@ public class StormDBBuilder {
             throw new IncorrectConfigException("Data to wal size ratio cannot be greater than " +
                     StormDBConfig.MAX_DATA_TO_WAL_FILE_RATIO);
         }
-        return new StormDB(dbConfig);
-    }
+        if (dbConfig.openFDCount > StormDBConfig.MAX_OPEN_FD_COUNT) {
+            throw new IncorrectConfigException("Open FD count cannot be greater than " +
+                    StormDBConfig.MAX_OPEN_FD_COUNT);
+        }
+        if (dbConfig.openFDCount < StormDBConfig.MIN_OPEN_FD_COUNT) {
+            throw new IncorrectConfigException("Open FD count cannot be less than " +
+                    StormDBConfig.MIN_OPEN_FD_COUNT);
+        }
 
-    public StormDBBuilder withDbDir(Path path) {
-        return withDbDir(path.toString());
+        return new StormDB(dbConfig);
     }
 }
