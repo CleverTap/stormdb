@@ -94,7 +94,7 @@ public class StormDB {
     // Common executor service stuff
     private static ExecutorService executorService;
     private static final ArrayList<StormDB> instancesServed = new ArrayList<>();
-    private final static Object commonCompactionSync = new Object();
+    private static final Object commonCompactionSync = new Object();
     private static boolean esShutDown = false;
 
     StormDB(final Config config) throws IOException {
@@ -186,8 +186,7 @@ public class StormDB {
                                     try {
                                         stormDB.compact();
                                     } catch (IOException e) {
-                                        LOG.error(
-                                                "IOException while compacting - " + e.getMessage());
+                                        LOG.error("Failed to compact!", e);
                                     }
                                 });
                             } else if (stormDB.shouldFlushBuffer()) {
@@ -587,13 +586,15 @@ public class StormDB {
         };
 
         final Buffer reader = new Buffer(conf, true);
+        boolean returnDataFilesEarly = true;
         try {
             reader.readFromFiles(walFiles, true, entryConsumer);
-        } catch (Throwable t) {
-            returnFiles.accept(dataFiles);
-            throw t;
+            returnDataFilesEarly = false;
         } finally {
             returnFiles.accept(walFiles);
+            if (returnDataFilesEarly) {
+                returnFiles.accept(dataFiles);
+            }
         }
 
         try {

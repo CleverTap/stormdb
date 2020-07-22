@@ -56,7 +56,7 @@ public class Buffer {
             throw new ValueSizeTooLargeException();
         }
 
-        this.maxRecords = calculateMaxRecords(valueSize);
+        this.maxRecords = calculateMaxRecords();
 
         final int blocks = this.maxRecords / RECORDS_PER_BLOCK;
 
@@ -71,8 +71,7 @@ public class Buffer {
         return byteBuffer.capacity();
     }
 
-    int calculateMaxRecords(final int valueSize) {
-        final int recordSize = valueSize + KEY_SIZE;
+    int calculateMaxRecords() {
         int recordsToBuffer = Math.max(dbConfig.getMaxBufferSize() / recordSize, RECORDS_PER_BLOCK);
 
         // Get to the nearest multiple of 128.

@@ -1,6 +1,6 @@
 package com.clevertap.stormdb.utils;
 
-import java.util.ArrayDeque;
+import java.util.Deque;
 
 /**
  * Created by Jude Pereira, at 14:35 on 09/07/2020.
@@ -24,7 +24,7 @@ public class ByteUtil {
                 | data[offset + 3] & 0xFF;
     }
 
-    public static boolean arrayEquals(byte[] primitiveBytes, ArrayDeque<Byte> bytes) {
+    public static boolean arrayEquals(byte[] primitiveBytes, Deque<Byte> bytes) {
         if (bytes == null || primitiveBytes == null) {
             return false;
         }

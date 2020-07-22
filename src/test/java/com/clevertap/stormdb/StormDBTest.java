@@ -144,12 +144,11 @@ class StormDBTest {
                 .build();
 
         db.close();
-        assertThrows(IncorrectConfigException.class, () ->
-                new StormDBBuilder()
-                        .withDbDir(dbDir)
-                        .withValueSize(16)
-                        .build());
 
+        final StormDBBuilder builder = new StormDBBuilder()
+                .withDbDir(dbDir)
+                .withValueSize(16);
+        assertThrows(IncorrectConfigException.class, builder::build);
     }
 
     @Test
@@ -164,7 +163,7 @@ class StormDBTest {
         StormDB stormDB = new StormDB(config);
 
         final HashMap<Integer, Long> kvCache = new HashMap<>();
-        int totalRecords =1000_000;
+        int totalRecords = 1000_000;
         for (int i = 0; i < totalRecords; i++) {
             long val = (long) (Math.random() * Long.MAX_VALUE);
             final ByteBuffer value = ByteBuffer.allocate(config.getValueSize());
@@ -175,9 +174,9 @@ class StormDBTest {
 
         final long sleepTimeMs = 10;
         long numberIterations = config.compactionWaitTimeoutMs * 5 / sleepTimeMs + 1;
-        while(numberIterations > 0) {
+        while (numberIterations > 0) {
             Thread.sleep(sleepTimeMs);
-            if(isCompactionComplete(config)) {
+            if (isCompactionComplete(config)) {
                 break;
             }
             numberIterations--;
@@ -194,16 +193,16 @@ class StormDBTest {
         File walFile = new File(conf.getDbDir() + File.separator + "wal");
         File nextDataFile = new File(conf.getDbDir() + File.separator + "data.next");
         File nextWalFile = new File(conf.getDbDir() + File.separator + "wal.next");
-        if(nextDataFile.exists()) {
+        if (nextDataFile.exists()) {
             return false;
         }
-        if(nextWalFile.exists()) {
+        if (nextWalFile.exists()) {
             return false;
         }
-        if(walFile.length() != 0) {
+        if (walFile.length() != 0) {
             return false;
         }
-        if(dataFile.length() == 0) {
+        if (dataFile.length() == 0) {
             return false;
         }
         return true;
@@ -227,7 +226,7 @@ class StormDBTest {
             allDbList.add(db);
 
             final ByteBuffer value = ByteBuffer.allocate(8);
-            int totalRecords =1000_000;
+            int totalRecords = 1000_000;
             for (int j = 0; j < totalRecords; j++) {
                 db.put(j, value.array());
             }
@@ -240,10 +239,10 @@ class StormDBTest {
                 * 5 / sleepTimeMs + 1;
         for (int i = 0; i < numberIterations; i++) {
             Thread.sleep(sleepTimeMs);
-            if(isCompactionComplete(listDb.get(0).getConf())) {
+            if (isCompactionComplete(listDb.get(0).getConf())) {
                 listDb.remove(0);
             }
-            if(listDb.isEmpty()) {
+            if (listDb.isEmpty()) {
                 break;
             }
         }
@@ -284,71 +283,38 @@ class StormDBTest {
 
     @Test
     void testIncorrectConfiguration() throws IOException {
-        assertThrows(IncorrectConfigException.class, () ->
-                new StormDBBuilder()
-                        .build());
+        StormDBBuilder builder = new StormDBBuilder();
+        assertThrows(IncorrectConfigException.class, builder::build);
 
         final Path path = Files.createTempDirectory("storm");
-        assertThrows(IncorrectConfigException.class, () ->
-                new StormDBBuilder()
-                        .withDbDir(path)
-                        .build());
+        builder = new StormDBBuilder().withDbDir(path);
+        assertThrows(IncorrectConfigException.class, builder::build);
 
-        assertThrows(IncorrectConfigException.class, () ->
-                new StormDBBuilder()
-                        .withDbDir(path)
-                        .withValueSize(10)
-                        .withCustomCompactionWaitTimeoutMs(100)
-                        .build());
+        builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
+                .withCustomBufferFlushTimeoutMs(100);
+        assertThrows(IncorrectConfigException.class, builder::build);
 
-        assertThrows(IncorrectConfigException.class, () ->
-                new StormDBBuilder()
-                        .withDbDir(path)
-                        .withValueSize(10)
-                        .withCustomCompactionWaitTimeoutMs(100)
-                        .build());
+        builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
+                .withCustomCompactionWaitTimeoutMs(100);
+        assertThrows(IncorrectConfigException.class, builder::build);
 
-        assertThrows(IncorrectConfigException.class, () ->
-                new StormDBBuilder()
-                        .withDbDir(path)
-                        .withValueSize(10)
-                        .withCustomMinBuffersToCompact(0)
-                        .build());
+        for (int invalidBuffers : new int[]{0, 2}) {
+            builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
+                    .withCustomMinBuffersToCompact(invalidBuffers);
+            assertThrows(IncorrectConfigException.class, builder::build);
+        }
 
-        assertThrows(IncorrectConfigException.class, () ->
-                new StormDBBuilder()
-                        .withDbDir(path)
-                        .withValueSize(10)
-                        .withCustomMinBuffersToCompact(2)
-                        .build());
+        for (int invalidRatio : new int[]{0, 101}) {
+            builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
+                    .withCustomDataToWalFileRatio(invalidRatio);
+            assertThrows(IncorrectConfigException.class, builder::build);
+        }
 
-        assertThrows(IncorrectConfigException.class, () ->
-                new StormDBBuilder()
-                        .withDbDir(path)
-                        .withValueSize(10)
-                        .withCustomDataToWalFileRatio(0)
-                        .build());
-
-        assertThrows(IncorrectConfigException.class, () ->
-                new StormDBBuilder()
-                        .withDbDir(path)
-                        .withValueSize(10)
-                        .withCustomDataToWalFileRatio(101)
-                        .build());
-
-        assertThrows(IncorrectConfigException.class, () ->
-                new StormDBBuilder()
-                        .withDbDir(path)
-                        .withValueSize(10)
-                        .withCustomOpenFDCount(0)
-                        .build());
-
-        assertThrows(IncorrectConfigException.class, () ->
-                new StormDBBuilder()
-                        .withDbDir(path)
-                        .withValueSize(10)
-                        .withCustomOpenFDCount(101)
-                        .build());
+        for (int invalidOpenFds : new int[]{0, 101}) {
+            builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
+                    .withCustomOpenFDCount(invalidOpenFds);
+            assertThrows(IncorrectConfigException.class, builder::build);
+        }
     }
 
     @Test
@@ -481,7 +447,7 @@ class StormDBTest {
                         assertNotEquals(prevKey[0], key);
                         prevKey[0] = key;
                         final ByteBuffer value = ByteBuffer.wrap(data, offset, valueSize);
-                        if(kvCache[key] < value.getLong()) {
+                        if (kvCache[key] < value.getLong()) {
                             exceptionOrAssertion[1] = true;
                         }
                     });

@@ -30,9 +30,11 @@ public class RandomAccessFileFactory implements
 
     @Override
     public void activateObject(File file, PooledObject<RandomAccessFileWrapper> pooledObject) {
+        // No action required.
     }
 
     @Override
     public void passivateObject(File file, PooledObject<RandomAccessFileWrapper> pooledObject) {
+        // No action required.
     }
 }

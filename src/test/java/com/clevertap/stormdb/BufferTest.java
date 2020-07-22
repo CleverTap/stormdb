@@ -229,12 +229,12 @@ class BufferTest {
                     Config.RECORDS_PER_BLOCK,
                     Config.RECORDS_PER_BLOCK + 1,
                     100, 1000, 10_000, 100_000, 200_000,
-                    buffer.calculateMaxRecords(valueSize)};
+                    buffer.calculateMaxRecords()};
 
             for (int records : recordsArr) {
                 for (boolean wal : wals) {
                     for (boolean far : flushAndRead) {
-                        if (records <= buffer.calculateMaxRecords(valueSize)) {
+                        if (records <= buffer.calculateMaxRecords()) {
                             builder.accept(Arguments.of(valueSize, records, wal, far));
                             builder.accept(Arguments.of(valueSize, records, wal, far));
                         }
