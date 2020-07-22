@@ -4,13 +4,16 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.when;
 
 import com.clevertap.stormdb.exceptions.IncorrectConfigException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import com.clevertap.stormdb.exceptions.StormDBException;
+import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -30,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 
 class StormDBTest {
 
@@ -358,11 +362,41 @@ class StormDBTest {
         buffer.clear();
 
         db = buildDB(dbPath, 100);
-        
+
         // Since wal.next/data.next had a record which wasn't present in the original database,
         // try to retrieve it.
         assertArrayEquals(value1, db.randomGet(1));
         assertArrayEquals(value2, db.randomGet(2));
+    }
+
+    @Test
+    void flushSimulateInfiniteCompaction() throws IOException {
+        final StormDB db = buildDB(Files.createTempDirectory("storm"), 10);
+
+        final CompactionState state = Mockito.mock(CompactionState.class);
+        when(state.getStart()).thenReturn(System.currentTimeMillis() - 31 * 60 * 1000L);
+        when(state.runningForTooLong()).thenReturn(true);
+
+        db.put(1, new byte[10]);
+        
+        db.compactionState = state;
+
+        assertNull(db.exceptionDuringBackgroundOps);
+        db.flush();
+
+        assertNotNull(db.exceptionDuringBackgroundOps);
+    }
+
+    @Test
+    void verifyPutFailure() throws IOException {
+        final StormDB db = buildDB(Files.createTempDirectory("storm"), 100);
+        db.put(1, new byte[100]);
+
+        db.exceptionDuringBackgroundOps = new StormDBRuntimeException();
+        assertThrows(StormDBRuntimeException.class, () -> db.put(1, new byte[100]));
+
+        db.exceptionDuringBackgroundOps = null;
+        db.put(1, new byte[100]);
     }
 
     @Test

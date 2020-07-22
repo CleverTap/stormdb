@@ -76,7 +76,7 @@ public class StormDB {
     private long bytesInWalFile = -1; // Will be initialised on the first write.
     private final File dbDirFile;
     private final Config conf;
-    private CompactionState compactionState;
+    CompactionState compactionState;
 
     private File dataFile;
     private File walFile;
@@ -88,6 +88,8 @@ public class StormDB {
     private final Object compactionLock = new Object();
     private boolean shutDown = false;
     private boolean useExecutorService = false; // We need this flag if using ES is done mid-way.
+
+    Throwable exceptionDuringBackgroundOps = null;
 
     private static final Logger LOG = LoggerFactory.getLogger(StormDB.class);
 
@@ -153,8 +155,9 @@ public class StormDB {
                             LOG.info("Flushing buffer to disk on timeout.");
                             flush();
                         }
-                    } catch (InterruptedException | IOException e) { // NOSONAR - there's nothing else that we can do.
+                    } catch (Throwable e) { // NOSONAR - there's nothing else that we can do.
                         LOG.error("Compaction failure!", e);
+                        exceptionDuringBackgroundOps = e;
                     }
                 }
             });
@@ -187,16 +190,21 @@ public class StormDB {
                                     try {
                                         stormDB.compact();
                                     } catch (IOException e) {
+                                        stormDB.exceptionDuringBackgroundOps = e;
                                         LOG.error("Failed to compact!", e);
                                     }
                                 });
                             } else if (stormDB.shouldFlushBuffer()) {
                                 LOG.info("Flushing buffer to disk on timeout.");
-                                stormDB.flush();
+                                try {
+                                    stormDB.flush();
+                                } catch (IOException e) {
+                                    stormDB.exceptionDuringBackgroundOps = e;
+                                }
                             }
                         }
                     }
-                } catch (InterruptedException | IOException e) { // NOSONAR - there's nothing else that we can do.
+                } catch (InterruptedException e) { // NOSONAR - there's nothing else that we can do.
                     LOG.error("Compaction failure!", e);
                 }
             }
@@ -353,8 +361,6 @@ public class StormDB {
         return compactionState != null;
     }
 
-    // TODO: 13/07/20 Handle case where compaction takes too long.
-    // TODO: 13/07/20 Handle case where compaction thread keeps failing.
     public void compact() throws IOException {
         synchronized (compactionLock) {
             final long start = System.currentTimeMillis();
@@ -428,6 +434,9 @@ public class StormDB {
 
             LOG.info("Compaction completed successfully in {} ms",
                     System.currentTimeMillis() - start);
+            // If the exception was assigned as a result of a background buffer flush,
+            // it will automatically be reset, and the following write will block indefinitely.
+            exceptionDuringBackgroundOps = null;
         }
     }
 
@@ -470,6 +479,11 @@ public class StormDB {
     }
 
     public void put(int key, byte[] value, int valueOffset) throws IOException {
+        if (exceptionDuringBackgroundOps != null) {
+            throw new StormDBRuntimeException("Will not accept any further writes since the "
+                    + "last compaction resulted in an exception!", exceptionDuringBackgroundOps);
+        }
+
         if (key == RESERVED_KEY_MARKER) {
             throw new ReservedKeyException(RESERVED_KEY_MARKER);
         }
@@ -503,7 +517,7 @@ public class StormDB {
         }
     }
 
-    private void flush() throws IOException {
+    public void flush() throws IOException {
         rwLock.writeLock().lock();
         try {
             // walOut is initialised on the first write to the writeBuffer.
@@ -515,6 +529,14 @@ public class StormDB {
             buffer.clear();
 
             lastBufferFlushTimeMs = System.currentTimeMillis();
+
+            if (isCompactionInProgress() && compactionState.runningForTooLong()) {
+                final long secondsSinceStart =
+                        (System.currentTimeMillis() - compactionState.getStart()) / 1000;
+                exceptionDuringBackgroundOps = new StormDBRuntimeException(
+                        "The last compaction has been running for over " + secondsSinceStart
+                                + " seconds!");
+            }
         } finally {
             rwLock.writeLock().unlock();
         }

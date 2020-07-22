@@ -15,4 +15,8 @@ public class StormDBRuntimeException extends RuntimeException {
     public StormDBRuntimeException(Throwable cause) {
         super(cause);
     }
+
+    public StormDBRuntimeException(String message, Throwable ex) {
+        super(message, ex);
+    }
 }

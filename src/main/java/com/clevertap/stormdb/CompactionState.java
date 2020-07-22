@@ -5,6 +5,8 @@ import java.util.BitSet;
 
 class CompactionState {
 
+    private final long start = System.currentTimeMillis();
+
     long nextFileRecordIndex;
 
     BitSet dataInNextFile = new BitSet();
@@ -13,4 +15,11 @@ class CompactionState {
     File nextWalFile;
     File nextDataFile;
 
+    boolean runningForTooLong() {
+        return System.currentTimeMillis() - start > 30 * 60 * 1000;
+    }
+
+    public long getStart() {
+        return start;
+    }
 }
