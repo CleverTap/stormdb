@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.concurrent.ExecutorService;
@@ -331,6 +332,52 @@ class StormDBTest {
         assertEquals(8 * 1024 * 1024, dbConfig.getMaxBufferSize());
         assertEquals(5, dbConfig.getMinBuffersToCompact());
         assertEquals(40, dbConfig.getOpenFDCount());
+    }
+
+    @Test
+    void recoverWithPartialWrites() throws IOException, InterruptedException, StormDBException {
+        final Path dbPath = Files.createTempDirectory("storm");
+        StormDB db = new StormDBBuilder()
+                .withValueSize(100)
+                .withDbDir(dbPath)
+                .build();
+
+        final byte[] value1 = new byte[100];
+        final byte[] value2 = new byte[100];
+        ThreadLocalRandom.current().nextBytes(value1);
+        ThreadLocalRandom.current().nextBytes(value2);
+
+        db.put(1, value1);
+        db.compact();
+        db.put(2, value2);
+
+        db.close();
+
+        final File walFile = new File(dbPath.toFile(), "wal");
+        final byte[] originalWalContent = Files
+                .readAllBytes(walFile.toPath());
+
+        final File dataFile = new File(dbPath.toFile(), "data");
+        final byte[] originalDataContent = Files
+                .readAllBytes(dataFile.toPath());
+
+        // Simulate partial writes to the WAL and data files.
+        Files.write(walFile.toPath(), new byte[100], StandardOpenOption.APPEND);
+        Files.write(dataFile.toPath(), new byte[100], StandardOpenOption.APPEND);
+
+        db = new StormDBBuilder()
+                .withValueSize(100)
+                .withDbDir(dbPath)
+                .build();
+
+        assertArrayEquals(value1, db.randomGet(1));
+        assertArrayEquals(value2, db.randomGet(2));
+
+        db.close();
+
+        // Verify that the data was successfully recovered.
+        assertArrayEquals(originalDataContent, Files.readAllBytes(dataFile.toPath()));
+        assertArrayEquals(originalWalContent, Files.readAllBytes(walFile.toPath()));
     }
 
     @Test
