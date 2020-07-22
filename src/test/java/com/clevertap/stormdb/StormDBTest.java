@@ -13,6 +13,7 @@ import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import com.clevertap.stormdb.exceptions.StormDBException;
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -334,13 +335,40 @@ class StormDBTest {
         assertEquals(40, dbConfig.getOpenFDCount());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings={"wal.next", "data.next"})
+    void recoverWithIncompleteCompaction(final String compactionFileName)
+            throws IOException, InterruptedException, StormDBException {
+        final Path dbPath = Files.createTempDirectory("storm");
+        StormDB db = buildDB(dbPath, 100);
+
+        final byte[] value1 = new byte[100];
+        final byte[] value2 = new byte[100];
+        ThreadLocalRandom.current().nextBytes(value1);
+        ThreadLocalRandom.current().nextBytes(value2);
+
+        db.put(1, value1);
+        db.close();
+
+        // Simulate a incomplete compaction by creating wal.next/data.next.
+        final Buffer buffer = new Buffer(db.getConf(), false);
+        buffer.add(2, value2, 0);
+
+        buffer.flush(new FileOutputStream(new File(dbPath.toFile(), compactionFileName)));
+        buffer.clear();
+
+        db = buildDB(dbPath, 100);
+        
+        // Since wal.next/data.next had a record which wasn't present in the original database,
+        // try to retrieve it.
+        assertArrayEquals(value1, db.randomGet(1));
+        assertArrayEquals(value2, db.randomGet(2));
+    }
+
     @Test
     void recoverWithPartialWrites() throws IOException, InterruptedException, StormDBException {
         final Path dbPath = Files.createTempDirectory("storm");
-        StormDB db = new StormDBBuilder()
-                .withValueSize(100)
-                .withDbDir(dbPath)
-                .build();
+        StormDB db = buildDB(dbPath, 100);
 
         final byte[] value1 = new byte[100];
         final byte[] value2 = new byte[100];
@@ -365,10 +393,7 @@ class StormDBTest {
         Files.write(walFile.toPath(), new byte[100], StandardOpenOption.APPEND);
         Files.write(dataFile.toPath(), new byte[100], StandardOpenOption.APPEND);
 
-        db = new StormDBBuilder()
-                .withValueSize(100)
-                .withDbDir(dbPath)
-                .build();
+        db = buildDB(dbPath, 100);
 
         assertArrayEquals(value1, db.randomGet(1));
         assertArrayEquals(value2, db.randomGet(2));
@@ -378,6 +403,13 @@ class StormDBTest {
         // Verify that the data was successfully recovered.
         assertArrayEquals(originalDataContent, Files.readAllBytes(dataFile.toPath()));
         assertArrayEquals(originalWalContent, Files.readAllBytes(walFile.toPath()));
+    }
+
+    private StormDB buildDB(Path dbPath, int valueSize) throws IOException {
+        return new StormDBBuilder()
+                .withValueSize(valueSize)
+                .withDbDir(dbPath)
+                .build();
     }
 
     @Test
