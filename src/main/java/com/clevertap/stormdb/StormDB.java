@@ -123,7 +123,7 @@ public class StormDB {
             final ByteBuffer meta = ByteBuffer.wrap(bytes);
             final int valueSizeFromMeta = meta.getInt();
             if (valueSizeFromMeta != conf.getValueSize()) {
-                    throw new IncorrectConfigException("The path " + conf.getDbDir()
+                throw new IncorrectConfigException("The path " + conf.getDbDir()
                         + " contains a StormDB database with the value size "
                         + valueSizeFromMeta + " bytes. "
                         + "However, " + conf.getValueSize() + " bytes was provided!");
@@ -177,13 +177,19 @@ public class StormDB {
         executorService.submit(() -> {
             esShutDown = false;
             while (!esShutDown) {
-                try {
-                    synchronized (commonCompactionSync) {
+                synchronized (commonCompactionSync) {
+                    try {
                         commonCompactionSync
                                 .wait(Config.getDefaultCompactionWaitTimeoutMs());
+                    } catch (InterruptedException e) {
+                        // Ignore this one.
+                        LOG.error("Interrupted while waiting for the "
+                                + "common compaction sync lock", e);
                     }
-                    synchronized (instancesServed) {
-                        for (StormDB stormDB : instancesServed) {
+                }
+                synchronized (instancesServed) {
+                    for (StormDB stormDB : instancesServed) {
+                        try {
                             if (stormDB.conf.autoCompactEnabled() && stormDB.shouldCompact()) {
                                 LOG.info("Auto Compacting now.");
                                 executorService.submit(() -> {
@@ -196,16 +202,13 @@ public class StormDB {
                                 });
                             } else if (stormDB.shouldFlushBuffer()) {
                                 LOG.info("Flushing buffer to disk on timeout.");
-                                try {
-                                    stormDB.flush();
-                                } catch (IOException e) {
-                                    stormDB.exceptionDuringBackgroundOps = e;
-                                }
+                                stormDB.flush();
                             }
+                        } catch (IOException e) {
+                            stormDB.exceptionDuringBackgroundOps = e;
+                            LOG.error("Failed to flush an open buffer!", e);
                         }
                     }
-                } catch (InterruptedException e) { // NOSONAR - there's nothing else that we can do.
-                    LOG.error("Compaction failure!", e);
                 }
             }
         });
