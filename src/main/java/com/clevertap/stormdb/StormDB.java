@@ -300,11 +300,12 @@ public class StormDB {
             // Safe, since walOut is always opened in an append only mode.
             Files.copy(nextWalFile.toPath(), walOut);
             walOut.flush();
+            initWalOut(); // Will update the byte count.
             Files.delete(nextWalFile.toPath());
             nextWalFileDeleted = true;
         }
 
-        // If a next data file exists, but no corresponding nextWalFile, then that probably
+        // If a next data file exists, but no corresponding nextWalFile, then it
         // means that just towards the end of the last compaction, the nextWalFile was deleted,
         // but the rename of next data file failed. Don't delete, but simply treat the next data
         // as a part of the WAL file.
@@ -315,6 +316,7 @@ public class StormDB {
             // Safe, since walOut is always opened in an append only mode.
             Files.copy(nextDataFile.toPath(), walOut);
             walOut.flush();
+            initWalOut(); // Will update the byte count.
 
             Files.delete(nextDataFile.toPath());
         }
