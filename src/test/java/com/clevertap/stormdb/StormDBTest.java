@@ -261,12 +261,12 @@ class StormDBTest {
                 .withValueSize(100)
                 .withDbDir(path)
                 .withAutoCompactDisabled()
-                .withCustomCompactionWaitTimeoutMs(45 * 1000)
-                .withCustomBufferFlushTimeoutMs(30 * 1000)
-                .withCustomDataToWalFileRatio(25)
-                .withCustomMaxBufferSize(8 * 1024 * 1024)
-                .withCustomMinBuffersToCompact(5)
-                .withCustomOpenFDCount(40)
+                .withCompactionWaitTimeoutMs(45 * 1000)
+                .withBufferFlushTimeoutMs(30 * 1000)
+                .withDataToWalFileRatio(25)
+                .withMaxBufferSize(8 * 1024 * 1024)
+                .withMinBuffersToCompact(5)
+                .withMaxOpenFDCount(40)
                 .build();
 
         final Config dbConfig = db.getConf();
@@ -291,28 +291,28 @@ class StormDBTest {
         assertThrows(IncorrectConfigException.class, builder::build);
 
         builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
-                .withCustomBufferFlushTimeoutMs(100);
+                .withBufferFlushTimeoutMs(100);
         assertThrows(IncorrectConfigException.class, builder::build);
 
         builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
-                .withCustomCompactionWaitTimeoutMs(100);
+                .withCompactionWaitTimeoutMs(100);
         assertThrows(IncorrectConfigException.class, builder::build);
 
         for (int invalidBuffers : new int[]{0, 2}) {
             builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
-                    .withCustomMinBuffersToCompact(invalidBuffers);
+                    .withMinBuffersToCompact(invalidBuffers);
             assertThrows(IncorrectConfigException.class, builder::build);
         }
 
         for (int invalidRatio : new int[]{0, 101}) {
             builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
-                    .withCustomDataToWalFileRatio(invalidRatio);
+                    .withDataToWalFileRatio(invalidRatio);
             assertThrows(IncorrectConfigException.class, builder::build);
         }
 
         for (int invalidOpenFds : new int[]{0, 101}) {
             builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
-                    .withCustomOpenFDCount(invalidOpenFds);
+                    .withMaxOpenFDCount(invalidOpenFds);
             assertThrows(IncorrectConfigException.class, builder::build);
         }
     }

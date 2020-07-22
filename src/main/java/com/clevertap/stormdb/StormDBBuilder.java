@@ -23,27 +23,27 @@ public class StormDBBuilder {
         return this;
     }
 
-    public StormDBBuilder withCustomCompactionWaitTimeoutMs(long compactionWaitTimeoutMs) {
+    public StormDBBuilder withCompactionWaitTimeoutMs(long compactionWaitTimeoutMs) {
         conf.compactionWaitTimeoutMs = compactionWaitTimeoutMs;
         return this;
     }
 
-    public StormDBBuilder withCustomMinBuffersToCompact(int minBuffersToCompact) {
+    public StormDBBuilder withMinBuffersToCompact(int minBuffersToCompact) {
         conf.minBuffersToCompact = minBuffersToCompact;
         return this;
     }
 
-    public StormDBBuilder withCustomDataToWalFileRatio(int dataToWalFileRatio) {
+    public StormDBBuilder withDataToWalFileRatio(int dataToWalFileRatio) {
         conf.dataToWalFileRatio = dataToWalFileRatio;
         return this;
     }
 
-    public StormDBBuilder withCustomBufferFlushTimeoutMs(long bufferFlushTimeoutMs) {
+    public StormDBBuilder withBufferFlushTimeoutMs(long bufferFlushTimeoutMs) {
         conf.bufferFlushTimeoutMs = bufferFlushTimeoutMs;
         return this;
     }
 
-    public StormDBBuilder withCustomMaxBufferSize(int maxBufferSize) {
+    public StormDBBuilder withMaxBufferSize(int maxBufferSize) {
         conf.maxBufferSize = maxBufferSize;
         return this;
     }
@@ -52,7 +52,7 @@ public class StormDBBuilder {
         return withDbDir(path.toString());
     }
 
-    public StormDBBuilder withCustomOpenFDCount(int openFDCount) {
+    public StormDBBuilder withMaxOpenFDCount(int openFDCount) {
         conf.openFDCount = openFDCount;
         return this;
     }
@@ -68,6 +68,10 @@ public class StormDBBuilder {
             throw new IncorrectConfigException("Compaction timeout cannot be less than " +
                     Config.MIN_COMPACTION_WAIT_TIMEOUT_MS);
         }
+        if (conf.bufferFlushTimeoutMs < 0) {
+            throw new IncorrectConfigException("Buffer flush timeout cannot be less than 0");
+        }
+
         if (conf.minBuffersToCompact < Config.FLOOR_MIN_BUFFERS_TO_COMPACT) {
             throw new IncorrectConfigException("Min buffers to compact cannot be less than " +
                     Config.FLOOR_MIN_BUFFERS_TO_COMPACT);
