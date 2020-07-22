@@ -218,7 +218,6 @@ class StormDBTest {
         final int totalInstances = 10;
         for (int i = 0; i < totalInstances; i++) {
             final Config config = new Config();
-            config.compactionWaitTimeoutMs = 100;
             config.valueSize = 8;
             config.dbDir = Files.createTempDirectory("storm").toString();
             config.minBuffersToCompact = 1;
@@ -248,6 +247,57 @@ class StormDBTest {
                 break;
             }
         }
+
+        assertTrue(listDb.isEmpty());
+
+        for (StormDB stormDB : allDbList) {
+            stormDB.close();
+        }
+
+        StormDB.shutDownExecutorService();
+    }
+
+    @Test
+    void testBufferFlushExecutorService() throws IOException, InterruptedException {
+        StormDB.initExecutorService(2);
+        final ArrayList<StormDB> allDbList = new ArrayList<>();
+
+        final int totalInstances = 10;
+        for (int i = 0; i < totalInstances; i++) {
+            final Config config = new Config();
+            config.bufferFlushTimeoutMs = 50;
+            config.maxBufferSize = 1024 * 1024;
+            config.valueSize = 8;
+            config.dbDir = Files.createTempDirectory("storm").toString();
+
+            StormDB db = new StormDB(config);
+            assertTrue(db.isUsingExecutorService());
+            allDbList.add(db);
+
+            final ByteBuffer value = ByteBuffer.allocate(8);
+            int totalRecords = 100_000;
+            for (int j = 0; j < totalRecords; j++) {
+                db.put(j, value.array());
+            }
+        }
+
+        long sleepTimeMs = 10;
+        ArrayList<StormDB> listDb = (ArrayList<StormDB>) allDbList.clone();
+        long numberIterations = Config.getDefaultCompactionWaitTimeoutMs() * 5 / sleepTimeMs + 1;
+        for (int i = 0; i < numberIterations; i++) {
+            final StormDB stormDB = listDb.get(0);
+            Thread.sleep(sleepTimeMs);
+            File walFile = new File(stormDB.getConf().getDbDir() + File.separator + "wal");
+//            System.out.println(walFile.toString());
+            if (walFile.exists() && walFile.length() > 0) {
+                listDb.remove(0);
+            }
+            if (listDb.isEmpty()) {
+                break;
+            }
+        }
+
+        assertTrue(listDb.isEmpty());
 
         for (StormDB stormDB : allDbList) {
             stormDB.close();
