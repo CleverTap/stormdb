@@ -185,6 +185,16 @@ public class StormDB {
                         // Ignore this one.
                         LOG.error("Interrupted while waiting for the "
                                 + "common compaction sync lock", e);
+
+                        synchronized (instancesServed) {
+                            for (StormDB stormDB : instancesServed) {
+                                stormDB.exceptionDuringBackgroundOps = e;
+                            }
+                        }
+
+                        executorService.shutdown(); // So that no more databases can be added.
+                        // Don't swallow the interruption: https://www.ibm.com/developerworks/java/library/j-jtp05236/index.html?ca=drs-#2.1
+                        Thread.currentThread().interrupt();
                     }
                 }
                 synchronized (instancesServed) {
@@ -437,9 +447,6 @@ public class StormDB {
 
             LOG.info("Compaction completed successfully in {} ms",
                     System.currentTimeMillis() - start);
-            // If the exception was assigned as a result of a background buffer flush,
-            // it will automatically be reset, and the following write will block indefinitely.
-            exceptionDuringBackgroundOps = null;
         }
     }
 
