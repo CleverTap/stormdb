@@ -291,7 +291,7 @@ class StormDBTest {
         assertThrows(IncorrectConfigException.class, builder::build);
 
         builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
-                .withBufferFlushTimeoutMs(100);
+                .withBufferFlushTimeoutMs(-1);
         assertThrows(IncorrectConfigException.class, builder::build);
 
         builder = new StormDBBuilder().withDbDir(path).withValueSize(10)
