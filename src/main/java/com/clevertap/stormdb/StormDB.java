@@ -172,6 +172,7 @@ public class StormDB {
         // We will create 1 extra thread to accommodate the poll/wait thread
         StormDB.executorService = Executors.newFixedThreadPool(nThreads + 1);
         executorService.submit(() -> {
+            esShutDown = false;
             while (!esShutDown) {
                 try {
                     synchronized (commonCompactionSync) {
