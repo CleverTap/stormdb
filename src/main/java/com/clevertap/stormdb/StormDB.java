@@ -696,4 +696,8 @@ public class StormDB {
         return dbConfig;
     }
 
+    public boolean isUsingExecutorService() {
+        return useExecutorService;
+    }
+
 }

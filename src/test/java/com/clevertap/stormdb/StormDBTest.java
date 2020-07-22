@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.when;
 
 import com.clevertap.stormdb.exceptions.IncorrectConfigException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
@@ -18,6 +20,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -27,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mockito;
+import org.mockito.stubbing.Answer;
 
 class StormDBTest {
 
@@ -156,17 +160,79 @@ class StormDBTest {
     }
 
     @Test
-    void testAutoCompaction() throws IOException {
-        // TODO: 16/07/20 Check for autocompaction here.
+    void testAutoCompaction() throws IOException, InterruptedException, StormDBException {
+        // Create custom config and avoid builder
+        final StormDBConfig stormDBConfig = new StormDBConfig();
+        stormDBConfig.compactionWaitTimeoutMs = 100;
+        stormDBConfig.valueSize = 8;
+        stormDBConfig.dbDir = Files.createTempDirectory("storm").toString();
+        stormDBConfig.minBuffersToCompact = 1;
+
+        StormDB stormDB = new StormDB(stormDBConfig);
+
+        final HashMap<Integer, Long> kvCache = new HashMap<>();
+        int totalRecords =1000_000;
+        for (int i = 0; i < totalRecords; i++) {
+            long val = (long) (Math.random() * Long.MAX_VALUE);
+            final ByteBuffer value = ByteBuffer.allocate(stormDBConfig.getValueSize());
+            value.putLong(val); // Insert a random value.
+            stormDB.put(i, value.array());
+            kvCache.put(i, val);
+        }
+
+        checkCompactionComplete(stormDBConfig);
+
+        // Make sure all is well
+        verifyDb(stormDB, totalRecords, kvCache);
+    }
+
+    private void checkCompactionComplete(StormDBConfig stormDBConfig) throws InterruptedException {
+        File dataFile = new File(stormDBConfig.getDbDir() + File.separator + "data");
+        File walFile = new File(stormDBConfig.getDbDir() + File.separator + "wal");
+        File nextDataFile = new File(stormDBConfig.getDbDir() + File.separator + "data.next");
+        File nextWalFile = new File(stormDBConfig.getDbDir() + File.separator + "wal.next");
+
+        final long sleepTimeMs = 10;
+        final long numberIterations = stormDBConfig.compactionWaitTimeoutMs * 5 / sleepTimeMs + 1;
+        for (int i = 0; i < numberIterations; i++) {
+            Thread.sleep(sleepTimeMs);
+            try {
+                assertFalse(nextDataFile.exists());
+                assertFalse(nextWalFile.exists());
+                assertEquals(0, walFile.length());
+                assertNotEquals(0, dataFile.length());
+            } catch (AssertionError e) {
+                continue;
+            }
+            break;
+        }
     }
 
     @Test
-    void testExecutorService() throws IOException {
-        // TODO: 20/07/20 Add test for using ES here.
-        final StormDB db = new StormDBBuilder()
-                .withDbDir(Files.createTempDirectory("storm"))
-                .withValueSize(8)
-                .build();
+    void testExecutorService() throws IOException, InterruptedException {
+        StormDB.initExecutorService(2);
+        final ArrayList<StormDB> listDb = new ArrayList<>();
+
+        final int totalInstances = 10;
+        for (int i = 0; i < totalInstances; i++) {
+            final StormDB db = new StormDBBuilder()
+                    .withDbDir(Files.createTempDirectory("storm"))
+                    .withValueSize(8)
+                    .build();
+            assertTrue(db.isUsingExecutorService());
+            listDb.add(db);
+
+            final ByteBuffer value = ByteBuffer.allocate(8);
+            int totalRecords =1000_000;
+            for (int j = 0; j < totalRecords; j++) {
+                db.put(j, value.array());
+            }
+        }
+
+        for (StormDB stormDB : listDb) {
+            stormDB.close();
+        }
+
     }
 
     @Test
