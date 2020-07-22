@@ -25,7 +25,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 class BlockUtilTest {
 
     // Create multiple dbConfig for parallel test.
-    private final StormDBConfig dbConfig = new StormDBConfig(); // Default dbConfig
+    private final Config dbConfig = new Config(); // Default dbConfig
 
     @Test
     void verifyBlocksGood() throws IOException {
@@ -84,9 +84,9 @@ class BlockUtilTest {
         final File tempFile = tempPath.toFile();
         tempFile.deleteOnExit();
 
-        final int recordSize = valueSize + StormDBConfig.KEY_SIZE;
-        final int blockSize = StormDBConfig.RECORDS_PER_BLOCK * recordSize
-                + StormDBConfig.CRC_SIZE + recordSize;
+        final int recordSize = valueSize + Config.KEY_SIZE;
+        final int blockSize = Config.RECORDS_PER_BLOCK * recordSize
+                + Config.CRC_SIZE + recordSize;
 
         try (final FileOutputStream out = new FileOutputStream(tempFile)) {
             if (addGarbageHeader) {

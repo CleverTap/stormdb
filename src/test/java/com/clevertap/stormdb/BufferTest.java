@@ -1,6 +1,6 @@
 package com.clevertap.stormdb;
 
-import static com.clevertap.stormdb.StormDBConfig.KEY_SIZE;
+import static com.clevertap.stormdb.Config.KEY_SIZE;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -52,7 +52,7 @@ import org.mockito.Mockito;
 class BufferTest {
 
     // If we want to parallelize tests, create new dbConfig everytime new buffer is called.
-    private static final StormDBConfig dbConfig = new StormDBConfig();
+    private static final Config dbConfig = new Config();
 
     private static Buffer newBuffer(final int valueSize, final boolean readOnly) {
         dbConfig.valueSize = valueSize;
@@ -136,7 +136,7 @@ class BufferTest {
         final Buffer buffer = newWriteBuffer(valueSize);
         final CRC32 crc32 = new CRC32();
 
-        for (int i = 0; i < StormDBConfig.RECORDS_PER_BLOCK; i++) {
+        for (int i = 0; i < Config.RECORDS_PER_BLOCK; i++) {
             final byte[] value = new byte[valueSize];
             ThreadLocalRandom.current().nextBytes(value);
             crc32.update(i >> 24);
@@ -153,7 +153,7 @@ class BufferTest {
         final ByteBuffer bytesWritten = ByteBuffer.wrap(out.toByteArray());
 
         // Verify CRC32 checksum.
-        bytesWritten.position(StormDBConfig.RECORDS_PER_BLOCK * recordSize + recordSize);
+        bytesWritten.position(Config.RECORDS_PER_BLOCK * recordSize + recordSize);
         assertNotEquals(0, crc32.getValue());
         assertEquals((int) crc32.getValue(), bytesWritten.getInt());
 
@@ -169,7 +169,7 @@ class BufferTest {
 
         // Ensure that nothing else was written.
         assertEquals(
-                StormDBConfig.RECORDS_PER_BLOCK * recordSize + StormDBConfig.CRC_SIZE + recordSize,
+                Config.RECORDS_PER_BLOCK * recordSize + Config.CRC_SIZE + recordSize,
                 bytesWritten.capacity());
     }
 
@@ -225,9 +225,9 @@ class BufferTest {
         for (int valueSize : valueSizes) {
             final Buffer buffer = newWriteBuffer(valueSize);
             final int[] recordsArr = {0, 1,
-                    StormDBConfig.RECORDS_PER_BLOCK - 1,
-                    StormDBConfig.RECORDS_PER_BLOCK,
-                    StormDBConfig.RECORDS_PER_BLOCK + 1,
+                    Config.RECORDS_PER_BLOCK - 1,
+                    Config.RECORDS_PER_BLOCK,
+                    Config.RECORDS_PER_BLOCK + 1,
                     100, 1000, 10_000, 100_000, 200_000,
                     buffer.calculateMaxRecords(valueSize)};
 

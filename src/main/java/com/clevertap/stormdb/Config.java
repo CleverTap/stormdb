@@ -2,7 +2,7 @@ package com.clevertap.stormdb;
 
 import java.nio.ByteBuffer;
 
-public class StormDBConfig {
+public class Config {
 
     // Block parameters
     public static final int RECORDS_PER_BLOCK = 128; // Not configurable for now.
@@ -69,7 +69,7 @@ public class StormDBConfig {
 
     /**
      * @return Compaction wait timeout in msec. With executor service {@link
-     * StormDBConfig#DEFAULT_COMPACTION_WAIT_TIMEOUT_MS} will be used.
+     * Config#DEFAULT_COMPACTION_WAIT_TIMEOUT_MS} will be used.
      */
     public long getCompactionWaitTimeoutMs() {
         return compactionWaitTimeoutMs;

@@ -6,8 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.Mockito.when;
 
 import com.clevertap.stormdb.exceptions.IncorrectConfigException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
@@ -29,8 +27,6 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.mockito.Mockito;
-import org.mockito.stubbing.Answer;
 
 class StormDBTest {
 
@@ -64,12 +60,9 @@ class StormDBTest {
         }
 
         // Iterate sequentially.
-        db.iterate(new EntryConsumer() {
-            @Override
-            public void accept(int key, byte[] data, int offset) {
-                final ByteBuffer value = ByteBuffer.wrap(data, offset, valueSize);
-                assertEquals(key, value.getInt());
-            }
+        db.iterate((key, data, offset) -> {
+            final ByteBuffer value = ByteBuffer.wrap(data, offset, valueSize);
+            assertEquals(key, value.getInt());
         });
 
         db.close();
@@ -77,9 +70,9 @@ class StormDBTest {
 
     @ParameterizedTest
     @ValueSource(ints = {0, 1, 2, 3, 4,
-            StormDBConfig.RECORDS_PER_BLOCK - 1,
-            StormDBConfig.RECORDS_PER_BLOCK,
-            StormDBConfig.RECORDS_PER_BLOCK + 1,
+            Config.RECORDS_PER_BLOCK - 1,
+            Config.RECORDS_PER_BLOCK,
+            Config.RECORDS_PER_BLOCK + 1,
             100, 1000, 10_000, 100_000, 200_000, 349_440})
     void compactionTest(final int totalRecords)
             throws IOException, StormDBException, InterruptedException {
@@ -162,38 +155,38 @@ class StormDBTest {
     @Test
     void testAutoCompaction() throws IOException, InterruptedException, StormDBException {
         // Create custom config and avoid builder
-        final StormDBConfig stormDBConfig = new StormDBConfig();
-        stormDBConfig.compactionWaitTimeoutMs = 100;
-        stormDBConfig.valueSize = 8;
-        stormDBConfig.dbDir = Files.createTempDirectory("storm").toString();
-        stormDBConfig.minBuffersToCompact = 1;
+        final Config config = new Config();
+        config.compactionWaitTimeoutMs = 100;
+        config.valueSize = 8;
+        config.dbDir = Files.createTempDirectory("storm").toString();
+        config.minBuffersToCompact = 1;
 
-        StormDB stormDB = new StormDB(stormDBConfig);
+        StormDB stormDB = new StormDB(config);
 
         final HashMap<Integer, Long> kvCache = new HashMap<>();
         int totalRecords =1000_000;
         for (int i = 0; i < totalRecords; i++) {
             long val = (long) (Math.random() * Long.MAX_VALUE);
-            final ByteBuffer value = ByteBuffer.allocate(stormDBConfig.getValueSize());
+            final ByteBuffer value = ByteBuffer.allocate(config.getValueSize());
             value.putLong(val); // Insert a random value.
             stormDB.put(i, value.array());
             kvCache.put(i, val);
         }
 
-        checkCompactionComplete(stormDBConfig);
+        checkCompactionComplete(config);
 
         // Make sure all is well
         verifyDb(stormDB, totalRecords, kvCache);
     }
 
-    private void checkCompactionComplete(StormDBConfig stormDBConfig) throws InterruptedException {
-        File dataFile = new File(stormDBConfig.getDbDir() + File.separator + "data");
-        File walFile = new File(stormDBConfig.getDbDir() + File.separator + "wal");
-        File nextDataFile = new File(stormDBConfig.getDbDir() + File.separator + "data.next");
-        File nextWalFile = new File(stormDBConfig.getDbDir() + File.separator + "wal.next");
+    private void checkCompactionComplete(Config conf) throws InterruptedException {
+        File dataFile = new File(conf.getDbDir() + File.separator + "data");
+        File walFile = new File(conf.getDbDir() + File.separator + "wal");
+        File nextDataFile = new File(conf.getDbDir() + File.separator + "data.next");
+        File nextWalFile = new File(conf.getDbDir() + File.separator + "wal.next");
 
         final long sleepTimeMs = 10;
-        final long numberIterations = stormDBConfig.compactionWaitTimeoutMs * 5 / sleepTimeMs + 1;
+        final long numberIterations = conf.compactionWaitTimeoutMs * 5 / sleepTimeMs + 1;
         for (int i = 0; i < numberIterations; i++) {
             Thread.sleep(sleepTimeMs);
             try {
@@ -250,7 +243,7 @@ class StormDBTest {
                 .withCustomOpenFDCount(40)
                 .build();
 
-        final StormDBConfig dbConfig = db.getDbConfig();
+        final Config dbConfig = db.getConf();
         assertEquals(100, dbConfig.getValueSize());
         assertEquals(path.toString(), dbConfig.getDbDir());
         assertFalse(dbConfig.autoCompactEnabled());
@@ -558,7 +551,7 @@ class StormDBTest {
             int c = 0;
             while ((br.readLine()) != null) {
                 if (c++ == totalLines / 2) {
-                    file.delete();
+                    assertTrue(file.delete());
                 }
             }
             fr.close();    //closes the stream and release the resources

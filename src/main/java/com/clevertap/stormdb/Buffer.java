@@ -1,9 +1,9 @@
 package com.clevertap.stormdb;
 
 import static com.clevertap.stormdb.StormDB.RESERVED_KEY_MARKER;
-import static com.clevertap.stormdb.StormDBConfig.CRC_SIZE;
-import static com.clevertap.stormdb.StormDBConfig.KEY_SIZE;
-import static com.clevertap.stormdb.StormDBConfig.RECORDS_PER_BLOCK;
+import static com.clevertap.stormdb.Config.CRC_SIZE;
+import static com.clevertap.stormdb.Config.KEY_SIZE;
+import static com.clevertap.stormdb.Config.RECORDS_PER_BLOCK;
 
 import com.clevertap.stormdb.exceptions.ReadOnlyBufferException;
 import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
@@ -30,14 +30,14 @@ public class Buffer {
     private final int valueSize;
     private final int recordSize;
     private final boolean readOnly;
-    private final StormDBConfig dbConfig;
+    private final Config dbConfig;
     private final int maxRecords;
 
     /**
      * Initialises a write buffer for the WAL file with the following specification:
      * <ol>
      *     <li>Calculates how many records can fit within a 4 MB buffer</li>
-     *     <li>If it turns out to be less than {@link StormDBConfig#RECORDS_PER_BLOCK}, it chooses 128
+     *     <li>If it turns out to be less than {@link Config#RECORDS_PER_BLOCK}, it chooses 128
      *     (this will happen for very large values)</li>
      *     <li>Now, make this a multiple of 128</li>
      *     <li>Then calculate how many CRCs and sync markers need to be accommodated</li>
@@ -47,12 +47,12 @@ public class Buffer {
      * @param dbConfig Configuration using which db instance is produced
      * @param readOnly Whether buffer is read only.
      */
-    Buffer(final StormDBConfig dbConfig, final boolean readOnly) {
+    Buffer(final Config dbConfig, final boolean readOnly) {
         this.valueSize = dbConfig.getValueSize();
         this.recordSize = valueSize + KEY_SIZE;
         this.readOnly = readOnly;
         this.dbConfig = dbConfig;
-        if (valueSize > StormDBConfig.MAX_VALUE_SIZE) {
+        if (valueSize > Config.MAX_VALUE_SIZE) {
             throw new ValueSizeTooLargeException();
         }
 
