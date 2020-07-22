@@ -5,23 +5,7 @@ package com.clevertap.stormdb.exceptions;
  */
 public class StormDBException extends Exception {
 
-    public StormDBException() {
-    }
-
     public StormDBException(String message) {
         super(message);
-    }
-
-    public StormDBException(String message, Throwable cause) {
-        super(message, cause);
-    }
-
-    public StormDBException(Throwable cause) {
-        super(cause);
-    }
-
-    public StormDBException(String message, Throwable cause, boolean enableSuppression,
-            boolean writableStackTrace) {
-        super(message, cause, enableSuppression, writableStackTrace);
     }
 }

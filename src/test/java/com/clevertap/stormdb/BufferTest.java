@@ -17,6 +17,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import com.clevertap.stormdb.exceptions.ReadOnlyBufferException;
+import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
 import com.clevertap.stormdb.utils.RecordUtil;
 import java.io.ByteArrayOutputStream;
@@ -375,5 +376,16 @@ class BufferTest {
             assertSame(recordConsumer, rcCaptor.getAllValues().get(i));
             assertSame(reverse, reverseCaptor.getAllValues().get(i));
         }
+    }
+
+    @Test
+    void invalidFilePointer() throws IOException {
+        final Buffer buffer = newWriteBuffer(100);
+
+        final RandomAccessFile raf = new RandomAccessFile(
+                Files.createTempFile("invalid", "storm").toFile(), "r");
+        raf.seek(10);
+
+        assertThrows(StormDBRuntimeException.class, () -> buffer.readFromFile(raf, true, null));
     }
 }

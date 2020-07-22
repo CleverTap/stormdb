@@ -12,16 +12,7 @@ public class StormDBRuntimeException extends RuntimeException {
         super(message);
     }
 
-    public StormDBRuntimeException(String message, Throwable cause) {
-        super(message, cause);
-    }
-
     public StormDBRuntimeException(Throwable cause) {
         super(cause);
-    }
-
-    public StormDBRuntimeException(String message, Throwable cause, boolean enableSuppression,
-            boolean writableStackTrace) {
-        super(message, cause, enableSuppression, writableStackTrace);
     }
 }

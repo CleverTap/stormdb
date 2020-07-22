@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,6 +44,7 @@ class StormDBTest {
 
         final int records = 100;
         for (int i = 0; i < records; i++) {
+            assertNull(db.randomGet(i));
             final ByteBuffer value = ByteBuffer.allocate(valueSize);
             value.putInt((int) (Math.random() * 100000000)); // Insert a random value.
             db.put(i, value.array());
