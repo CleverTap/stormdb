@@ -59,7 +59,7 @@ public class StormDBBuilder {
 
     public StormDB build() throws IOException {
         if (dbConfig.dbDir == null || dbConfig.dbDir.isEmpty()) {
-            throw new IncorrectConfigException("StormDB directory cannot be empty or null.");
+            throw new IncorrectConfigException("StormDB directory path cannot be empty or null.");
         }
         if (dbConfig.valueSize == 0) {
             throw new IncorrectConfigException("ValueSize cannot be 0.");

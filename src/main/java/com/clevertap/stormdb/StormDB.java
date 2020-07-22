@@ -692,4 +692,8 @@ public class StormDB {
         }
     }
 
+    public StormDBConfig getDbConfig() {
+        return dbConfig;
+    }
+
 }

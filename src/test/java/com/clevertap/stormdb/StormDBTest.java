@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mockito;
 
 class StormDBTest {
 
@@ -155,18 +156,113 @@ class StormDBTest {
     }
 
     @Test
-    void testAutoCompaction() {
+    void testAutoCompaction() throws IOException {
         // TODO: 16/07/20 Check for autocompaction here.
     }
 
     @Test
-    void testExecutorService() {
+    void testExecutorService() throws IOException {
         // TODO: 20/07/20 Add test for using ES here.
+        final StormDB db = new StormDBBuilder()
+                .withDbDir(Files.createTempDirectory("storm"))
+                .withValueSize(8)
+                .build();
     }
 
     @Test
-    void testMultipleConfigurations() {
-        // TODO: 21/07/20 Add tests for all storm db configurations
+    void testMultipleConfigurations() throws IOException {
+        final Path path = Files.createTempDirectory("storm");
+        StormDB db = new StormDBBuilder()
+                .withValueSize(100)
+                .withDbDir(path)
+                .withAutoCompactDisabled()
+                .withCustomCompactionWaitTimeoutMs(45 * 1000)
+                .withCustomBufferFlushTimeoutMs(30 * 1000)
+                .withCustomDataToWalFileRatio(25)
+                .withCustomMaxBufferSize(8 * 1024 * 1024)
+                .withCustomMinBuffersToCompact(5)
+                .withCustomOpenFDCount(40)
+                .build();
+
+        final StormDBConfig dbConfig = db.getDbConfig();
+        assertEquals(100, dbConfig.getValueSize());
+        assertEquals(path.toString(), dbConfig.getDbDir());
+        assertFalse(dbConfig.autoCompactEnabled());
+        assertEquals(30 * 1000, dbConfig.getBufferFlushTimeoutMs());
+        assertEquals(45 * 1000, dbConfig.getCompactionWaitTimeoutMs());
+        assertEquals(25, dbConfig.getDataToWalFileRatio());
+        assertEquals(8 * 1024 * 1024, dbConfig.getMaxBufferSize());
+        assertEquals(5, dbConfig.getMinBuffersToCompact());
+        assertEquals(40, dbConfig.getOpenFDCount());
+    }
+
+    @Test
+    void testIncorrectConfiguration() throws IOException {
+        assertThrows(IncorrectConfigException.class, () ->
+                new StormDBBuilder()
+                        .build());
+
+        final Path path = Files.createTempDirectory("storm");
+        assertThrows(IncorrectConfigException.class, () ->
+                new StormDBBuilder()
+                        .withDbDir(path)
+                        .build());
+
+        assertThrows(IncorrectConfigException.class, () ->
+                new StormDBBuilder()
+                        .withDbDir(path)
+                        .withValueSize(10)
+                        .withCustomCompactionWaitTimeoutMs(100)
+                        .build());
+
+        assertThrows(IncorrectConfigException.class, () ->
+                new StormDBBuilder()
+                        .withDbDir(path)
+                        .withValueSize(10)
+                        .withCustomCompactionWaitTimeoutMs(100)
+                        .build());
+
+        assertThrows(IncorrectConfigException.class, () ->
+                new StormDBBuilder()
+                        .withDbDir(path)
+                        .withValueSize(10)
+                        .withCustomMinBuffersToCompact(0)
+                        .build());
+
+        assertThrows(IncorrectConfigException.class, () ->
+                new StormDBBuilder()
+                        .withDbDir(path)
+                        .withValueSize(10)
+                        .withCustomMinBuffersToCompact(2)
+                        .build());
+
+        assertThrows(IncorrectConfigException.class, () ->
+                new StormDBBuilder()
+                        .withDbDir(path)
+                        .withValueSize(10)
+                        .withCustomDataToWalFileRatio(0)
+                        .build());
+
+        assertThrows(IncorrectConfigException.class, () ->
+                new StormDBBuilder()
+                        .withDbDir(path)
+                        .withValueSize(10)
+                        .withCustomDataToWalFileRatio(101)
+                        .build());
+
+        assertThrows(IncorrectConfigException.class, () ->
+                new StormDBBuilder()
+                        .withDbDir(path)
+                        .withValueSize(10)
+                        .withCustomOpenFDCount(0)
+                        .build());
+
+        assertThrows(IncorrectConfigException.class, () ->
+                new StormDBBuilder()
+                        .withDbDir(path)
+                        .withValueSize(10)
+                        .withCustomOpenFDCount(101)
+                        .build());
     }
 
     @Test
@@ -234,6 +330,7 @@ class StormDBTest {
         db.close();
     }
 
+    // TODO: 22/07/20 Check once if exception thrown is caught right
     @Test
     void testMultiThreaded() throws IOException, InterruptedException, StormDBException {
         final Path path = Files.createTempDirectory("stormdb");
