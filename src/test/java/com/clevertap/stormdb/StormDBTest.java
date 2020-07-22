@@ -173,47 +173,52 @@ class StormDBTest {
             kvCache.put(i, val);
         }
 
-        checkCompactionComplete(config);
+        final long sleepTimeMs = 10;
+        final long numberIterations = config.compactionWaitTimeoutMs * 5 / sleepTimeMs + 1;
+        for (int i = 0; i < numberIterations; i++) {
+            Thread.sleep(sleepTimeMs);
+            if(isCompactionComplete(config)) {
+                break;
+            }
+        }
 
         // Make sure all is well
         verifyDb(stormDB, totalRecords, kvCache);
     }
 
-    private void checkCompactionComplete(Config conf) throws InterruptedException {
+    private boolean isCompactionComplete(Config conf) throws InterruptedException {
         File dataFile = new File(conf.getDbDir() + File.separator + "data");
         File walFile = new File(conf.getDbDir() + File.separator + "wal");
         File nextDataFile = new File(conf.getDbDir() + File.separator + "data.next");
         File nextWalFile = new File(conf.getDbDir() + File.separator + "wal.next");
 
-        final long sleepTimeMs = 10;
-        final long numberIterations = conf.compactionWaitTimeoutMs * 5 / sleepTimeMs + 1;
-        for (int i = 0; i < numberIterations; i++) {
-            Thread.sleep(sleepTimeMs);
-            try {
-                assertFalse(nextDataFile.exists());
-                assertFalse(nextWalFile.exists());
-                assertEquals(0, walFile.length());
-                assertNotEquals(0, dataFile.length());
-            } catch (AssertionError e) {
-                continue;
-            }
-            break;
+        try {
+            assertFalse(nextDataFile.exists());
+            assertFalse(nextWalFile.exists());
+            assertEquals(0, walFile.length());
+            assertNotEquals(0, dataFile.length());
+        } catch (AssertionError e) {
+            return false;
         }
+        return true;
     }
 
     @Test
     void testExecutorService() throws IOException, InterruptedException {
         StormDB.initExecutorService(2);
-        final ArrayList<StormDB> listDb = new ArrayList<>();
+        final ArrayList<StormDB> allDbList = new ArrayList<>();
 
         final int totalInstances = 10;
         for (int i = 0; i < totalInstances; i++) {
-            final StormDB db = new StormDBBuilder()
-                    .withDbDir(Files.createTempDirectory("storm"))
-                    .withValueSize(8)
-                    .build();
+            final Config config = new Config();
+            config.compactionWaitTimeoutMs = 100;
+            config.valueSize = 8;
+            config.dbDir = Files.createTempDirectory("storm").toString();
+            config.minBuffersToCompact = 1;
+
+            StormDB db = new StormDB(config);
             assertTrue(db.isUsingExecutorService());
-            listDb.add(db);
+            allDbList.add(db);
 
             final ByteBuffer value = ByteBuffer.allocate(8);
             int totalRecords =1000_000;
@@ -221,11 +226,27 @@ class StormDBTest {
                 db.put(j, value.array());
             }
         }
+        System.out.println("Finished writing data.");
 
-        for (StormDB stormDB : listDb) {
+        final ArrayList<StormDB> listDb = (ArrayList<StormDB>) allDbList.clone();
+        final long sleepTimeMs = 10;
+        final long numberIterations = listDb.size() * Config.getDefaultCompactionWaitTimeoutMs()
+                * 5 / sleepTimeMs + 1;
+        for (int i = 0; i < numberIterations; i++) {
+            Thread.sleep(sleepTimeMs);
+            if(isCompactionComplete(listDb.get(0).getConf())) {
+                listDb.remove(0);
+            }
+            if(listDb.isEmpty()) {
+                break;
+            }
+        }
+
+        for (StormDB stormDB : allDbList) {
             stormDB.close();
         }
 
+        StormDB.shutDownExecutorService();
     }
 
     @Test
@@ -389,7 +410,6 @@ class StormDBTest {
         db.close();
     }
 
-    // TODO: 22/07/20 Check once if exception thrown is caught right
     @Test
     void testMultiThreaded() throws IOException, InterruptedException, StormDBException {
         final Path path = Files.createTempDirectory("stormdb");
@@ -406,16 +426,15 @@ class StormDBTest {
         final int[] timeToRunInSeconds = {10};
         long[] kvCache = new long[totalRecords];
 
-        final Boolean[] exceptionThrown = {false};
+        final Boolean[] exceptionOrAssertion = {false, false};
         final Boolean[] shutdown = {false};
         final ExecutorService service = Executors.newFixedThreadPool(4);
 
         // Writer thread.
         service.submit(() -> {
             while (!shutdown[0]) {
-                int iterationNumber = 1;
                 for (int i = 0; i < totalRecords; i++) {
-                    long val = (i % 1000) * iterationNumber;
+                    long val = (i % 1000);
                     final ByteBuffer value = ByteBuffer.allocate(valueSize);
                     value.putLong(val); // Insert a random value.
                     synchronized (kvCache) {
@@ -423,13 +442,12 @@ class StormDBTest {
                     }
                     try {
                         db.put(i, value.array());
-                    } catch (IOException e) {
+                    } catch (Exception e) {
                         e.printStackTrace();
-                        exceptionThrown[0] = true;
+                        exceptionOrAssertion[0] = true;
                     }
                 }
                 sleepRandomMs("writer", maxSleepMs);
-                iterationNumber++;
             }
             System.out.println("Finished writer thread.");
         });
@@ -439,9 +457,9 @@ class StormDBTest {
             while (!shutdown[0]) {
                 try {
                     db.compact();
-                } catch (IOException e) {
+                } catch (Exception e) {
                     e.printStackTrace();
-                    exceptionThrown[0] = true;
+                    exceptionOrAssertion[0] = true;
                 }
                 sleepRandomMs("compaction", maxSleepMs);
             }
@@ -461,9 +479,8 @@ class StormDBTest {
                             assertTrue(kvCache[key] >= value.getLong());
                         }
                     });
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    exceptionThrown[0] = true;
+                } catch (Throwable t) {
+                    exceptionOrAssertion[1] = true;
                 }
 //                sleepRandomMs("iterate", maxSleepMs);
             }
@@ -484,28 +501,21 @@ class StormDBTest {
         });
 
         // Verifier / Reader
-
         while (!shutdown[0]) {
-//                    System.out.println("VERIFY1=");
             for (int i = 0; i < totalRecords; i++) {
                 final byte[] bytes;
                 try {
-//                            System.out.println("VERIFY2-" + i);
                     bytes = db.randomGet(i);
                     if (bytes == null) {
                         continue;
                     }
                     final ByteBuffer value = ByteBuffer.wrap(bytes);
                     final long longValue = value.getLong();
-//                            System.out.println("VERIFY3-" + i + " value=" + longValue +
-//                                    " kvCache[i] = " + kvCache[i]);
                     synchronized (kvCache) {
                         assertTrue(kvCache[i] >= longValue);
                     }
-//                            System.out.println("VERIFY4-" + i);
-                } catch (IOException e) {
-                    exceptionThrown[0] = true;
-                    throw e;
+                } catch (Throwable t) {
+                    exceptionOrAssertion[1] = true;
                 }
             }
             sleepRandomMs("verifier", maxSleepMs);
@@ -516,7 +526,8 @@ class StormDBTest {
         service.shutdown();
         assertTrue(service.awaitTermination(5, TimeUnit.SECONDS));
         db.close();
-        assertFalse(exceptionThrown[0]);
+        assertFalse(exceptionOrAssertion[0]);
+        assertFalse(exceptionOrAssertion[1]);
     }
 
     private void sleepRandomMs(String caller, int maxMs) {
