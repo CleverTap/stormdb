@@ -48,6 +48,8 @@ class StormDBTest {
                 .withAutoCompactDisabled()
                 .build();
 
+        assertEquals(0, db.size());
+
         final int records = 100;
         for (int i = 0; i < records; i++) {
             assertNull(db.randomGet(i));
@@ -59,6 +61,8 @@ class StormDBTest {
             value.putInt(i); // Insert a predictable value.
             db.put(i, value.array());
         }
+
+        assertEquals(records, db.size());
 
         // Verify.
         for (int i = 0; i < records; i++) {

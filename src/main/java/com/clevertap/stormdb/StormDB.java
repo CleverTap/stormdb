@@ -736,4 +736,7 @@ public class StormDB {
         return useExecutorService;
     }
 
+    public int size() {
+        return index.size();
+    }
 }
