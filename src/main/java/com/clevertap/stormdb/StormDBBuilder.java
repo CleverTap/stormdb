@@ -1,6 +1,7 @@
 package com.clevertap.stormdb;
 
 import com.clevertap.stormdb.exceptions.IncorrectConfigException;
+import com.clevertap.stormdb.maps.IndexMap;
 import java.io.IOException;
 import java.nio.file.Path;
 
@@ -101,6 +102,16 @@ public class StormDBBuilder {
      */
     public StormDBBuilder withMaxBufferSize(int maxBufferSize) {
         conf.maxBufferSize = maxBufferSize;
+        return this;
+    }
+
+    /**
+     * Option to specify custom index map based on application requirement.
+     *
+     * @param indexMap Custom map instance.
+     */
+    public StormDBBuilder withIndexMap(IndexMap indexMap) {
+        conf.indexMap = indexMap;
         return this;
     }
 

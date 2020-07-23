@@ -1,5 +1,6 @@
 package com.clevertap.stormdb;
 
+import com.clevertap.stormdb.maps.IndexMap;
 import java.nio.ByteBuffer;
 
 public class Config {
@@ -50,6 +51,7 @@ public class Config {
     long bufferFlushTimeoutMs = DEFAULT_BUFFER_FLUSH_TIMEOUT_MS;
     int maxBufferSize = DEFAULT_MAX_BUFFER_SIZE;
     int openFDCount = DEFAULT_OPEN_FD_COUNT;
+    IndexMap indexMap;
 
     public boolean autoCompactEnabled() {
         return autoCompact;
@@ -94,5 +96,7 @@ public class Config {
     public int getOpenFDCount() {
         return openFDCount;
     }
+
+    public IndexMap getIndexMap() { return indexMap; }
 
 }
