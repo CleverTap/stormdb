@@ -1,6 +1,6 @@
 package com.clevertap.stormdb;
 
-import com.clevertap.stormdb.index.IndexMap;
+import com.clevertap.stormdb.maps.IndexMap;
 import java.nio.ByteBuffer;
 
 public class Config {

@@ -5,8 +5,8 @@ import com.clevertap.stormdb.exceptions.IncorrectConfigException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import com.clevertap.stormdb.exceptions.StormDBException;
 import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
-import com.clevertap.stormdb.index.IndexMap;
-import com.clevertap.stormdb.index.DefaultIndexMap;
+import com.clevertap.stormdb.maps.DefaultIndexMap;
+import com.clevertap.stormdb.maps.IndexMap;
 import com.clevertap.stormdb.internal.RandomAccessFilePool;
 import com.clevertap.stormdb.utils.ByteUtil;
 import com.clevertap.stormdb.utils.RecordUtil;
@@ -45,7 +45,7 @@ import org.slf4j.LoggerFactory;
  */
 public class StormDB {
 
-    static final int RESERVED_KEY_MARKER = 0xffffffff;
+    public static final int RESERVED_KEY_MARKER = 0xffffffff;
 
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
@@ -56,7 +56,6 @@ public class StormDB {
      * <p>
      * Value: The offset (either in the data file, or in the WAL file)
      */
-    // TODO: 03/07/2020 change this map to one that is array based (saves 1/2 the size)
     private final IndexMap index;
 
     private BitSet dataInWalFile = new BitSet();
@@ -102,7 +101,7 @@ public class StormDB {
         //noinspection ResultOfMethodCallIgnored
         dbDirFile.mkdirs();
 
-        if(conf.getIndexMap() == null) {
+        if (conf.getIndexMap() == null) {
             index = new DefaultIndexMap();
         } else {
             index = conf.getIndexMap();

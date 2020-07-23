@@ -3,7 +3,7 @@ package com.clevertap.stormdb;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.clevertap.stormdb.exceptions.StormDBException;
-import com.clevertap.stormdb.index.IndexMap;
+import com.clevertap.stormdb.maps.IndexMap;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -11,10 +11,10 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import org.junit.jupiter.api.Test;
 
-public class CustomIndexMapTest {
+class CustomIndexMapTest {
 
     @Test
-    public void testCustomMap() throws IOException, StormDBException {
+    void testCustomMap() throws IOException, StormDBException {
         final Path path = Files.createTempDirectory("stormdb");
         final int valueSize = 8;
         final HashMap<Integer, Integer> kvCache = new HashMap<>();
@@ -23,7 +23,7 @@ public class CustomIndexMapTest {
                 .withDbDir(path.toString())
                 .withValueSize(valueSize)
                 .withAutoCompactDisabled()
-                .withCustomIndexMap(new IndexMap() {
+                .withIndexMap(new IndexMap() {
                     @Override
                     public void put(int key, int indexValue) {
                         activityCount[0]++;

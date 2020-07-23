@@ -1,7 +1,7 @@
 package com.clevertap.stormdb;
 
 import com.clevertap.stormdb.exceptions.IncorrectConfigException;
-import com.clevertap.stormdb.index.IndexMap;
+import com.clevertap.stormdb.maps.IndexMap;
 import java.io.IOException;
 import java.nio.file.Path;
 
@@ -110,7 +110,7 @@ public class StormDBBuilder {
      *
      * @param indexMap Custom map instance.
      */
-    public StormDBBuilder withCustomIndexMap(IndexMap indexMap) {
+    public StormDBBuilder withIndexMap(IndexMap indexMap) {
         conf.indexMap = indexMap;
         return this;
     }

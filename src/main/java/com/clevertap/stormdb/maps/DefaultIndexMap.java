@@ -1,5 +1,6 @@
-package com.clevertap.stormdb.index;
+package com.clevertap.stormdb.maps;
 
+import com.clevertap.stormdb.StormDB;
 import gnu.trove.map.hash.TIntIntHashMap;
 
 public class DefaultIndexMap implements IndexMap {
@@ -12,8 +13,8 @@ public class DefaultIndexMap implements IndexMap {
     }
 
     public DefaultIndexMap(int initialCapacity, float loadFactor) {
-        indexMap = new TIntIntHashMap(initialCapacity, loadFactor, IndexMap.NO_ENTRY_KEY,
-                IndexMap.NO_ENTRY_INDEX_VALUE);
+        indexMap = new TIntIntHashMap(initialCapacity, loadFactor, StormDB.RESERVED_KEY_MARKER,
+                StormDB.RESERVED_KEY_MARKER);
     }
 
     @Override
