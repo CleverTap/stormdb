@@ -175,4 +175,40 @@
             </plugin>
         </plugins>
     </build>
+
+    <distributionManagement>
+        <repository>
+            <id>bintray-clevertap-Maven</id>
+            <name>clevertap-Maven</name>
+            <url>https://api.bintray.com/maven/clevertap/Maven/StormDB/;publish=1</url>
+        </repository>
+    </distributionManagement>
+
+    <scm>
+        <connection>scm:git:git://github.com/CleverTap/stormdb.git</connection>
+        <developerConnection>scm:git:ssh://github.com:CleverTap/stormdb.git</developerConnection>
+        <url>https://github.com/CleverTap/stormdb/tree/master</url>
+    </scm>
+
+    <developers>
+        <developer>
+            <name>Jude Pereira</name>
+            <email>jude@clevertap.com</email>
+            <organization>CleverTap</organization>
+            <organizationUrl>https://clevertap.com</organizationUrl>
+        </developer>
+        <developer>
+            <name>Hardik Shah</name>
+            <email>hardik@clevertap.com</email>
+            <organization>CleverTap</organization>
+            <organizationUrl>https://clevertap.com</organizationUrl>
+        </developer>
+    </developers>
+
+    <licenses>
+        <license>
+            <name>MIT</name>
+            <url>https://opensource.org/licenses/MIT</url>
+        </license>
+    </licenses>
 </project>
