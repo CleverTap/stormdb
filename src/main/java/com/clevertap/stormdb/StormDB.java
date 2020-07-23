@@ -5,10 +5,11 @@ import com.clevertap.stormdb.exceptions.IncorrectConfigException;
 import com.clevertap.stormdb.exceptions.ReservedKeyException;
 import com.clevertap.stormdb.exceptions.StormDBException;
 import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
+import com.clevertap.stormdb.index.IndexMap;
+import com.clevertap.stormdb.index.DefaultIndexMap;
 import com.clevertap.stormdb.internal.RandomAccessFilePool;
 import com.clevertap.stormdb.utils.ByteUtil;
 import com.clevertap.stormdb.utils.RecordUtil;
-import gnu.trove.map.hash.TIntIntHashMap;
 import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
@@ -45,7 +46,6 @@ import org.slf4j.LoggerFactory;
 public class StormDB {
 
     static final int RESERVED_KEY_MARKER = 0xffffffff;
-    private static final int NO_MAPPING_FOUND = 0xffffffff;
 
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
@@ -55,12 +55,9 @@ public class StormDB {
      * Key: The actual key within this KV store.
      * <p>
      * Value: The offset (either in the data file, or in the WAL file)
-     * <p>
-     * Note: Negative offset indicates an offset in the
      */
     // TODO: 03/07/2020 change this map to one that is array based (saves 1/2 the size)
-    private final TIntIntHashMap index = new TIntIntHashMap(100_000, 0.95f, Integer.MAX_VALUE,
-            NO_MAPPING_FOUND);
+    private final IndexMap index;
 
     private BitSet dataInWalFile = new BitSet();
 
@@ -104,6 +101,12 @@ public class StormDB {
         dbDirFile = new File(conf.getDbDir());
         //noinspection ResultOfMethodCallIgnored
         dbDirFile.mkdirs();
+
+        if(conf.getIndexMap() == null) {
+            index = new DefaultIndexMap();
+        } else {
+            index = conf.getIndexMap();
+        }
 
         recordSize = conf.getValueSize() + Config.KEY_SIZE;
 
@@ -647,7 +650,7 @@ public class StormDB {
         final long address;
         try {
             recordIndex = index.get(key);
-            if (recordIndex == NO_MAPPING_FOUND) { // No mapping value.
+            if (recordIndex == IndexMap.NO_ENTRY_INDEX_VALUE) { // No mapping value.
                 return null; // NOSONAR - returning null is a part of the interface.
             }
 
