@@ -14,6 +14,20 @@ and is not yet ready for production usage.
 - Affinity to cluster recently updated keys for higher random IO on such keys
 - Ability to recover from file corruption
 
+## Benchmarks
+We ran a small benchmark for 100 million 4 byte keys with 28 byte values, and the results are shown below:
+
+### Iteration
+<img src="./static/iteration_28_bytes_100m.svg"/>
+
+### Random
+<img src="./static/random_28_bytes_100m.svg"/>
+
+**Note:** We've only compared this with RocksDB since in all our previous benchmarks, 
+we've observed that RocksDB was the fastest.
+
+More details about this benchmark may be found [here](wiki/Blocks).
+
 ## Motivation
 The primary motivation behind StormDB was to achieve fast sequential scans across all keys
 in the database. When we benchmarked sequential reads of popular key value stores, we realised:
