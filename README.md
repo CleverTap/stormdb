@@ -25,7 +25,7 @@ We ran a small benchmark for 100 million 4 byte keys with 28 byte values, and th
 **Note:** We've only compared this with RocksDB since in all our previous benchmarks, 
 we've observed that RocksDB was the fastest.
 
-More details about this benchmark may be found [here](wiki/Benchmarks).
+More details about this benchmark may be found [here](/CleverTap/stormdb/wiki/Benchmarks).
 
 ## Motivation
 The primary motivation behind StormDB was to achieve fast sequential scans across all keys
