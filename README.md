@@ -42,6 +42,49 @@ in the database. When we benchmarked sequential reads of popular key value store
     - Therefore, the operating system can cache just the head of the data file,
       and provide high throughput random reads without caching the entire data file
 
+## Getting Started
+1. Add the CleverTap Maven Bintray repository
+```xml
+<repositories>
+    <repository>
+        <id>bintray-clevertap-Maven</id>
+        <name>bintray</name>
+        <url>https://dl.bintray.com/clevertap/Maven</url>
+    </repository>
+</repositories>
+```
+2. Add the Maven dependency
+```xml
+<!-- Heads up! Use the latest version from https://github.com/CleverTap/stormdb/releases/latest -->
+<dependency>
+    <groupId>com.clevertap</groupId>
+    <artifactId>stormdb</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
+3. Create and use a StormDB instance
+```java
+// Create.
+final StormDB db = new StormDBBuilder()
+        .withDbDir("path/to/db")
+        .withValueSize(28)
+        .build();
+
+// Put.
+db.put(1, new byte[28]);
+
+// Get.
+final byte[] value = db.randomGet(1);
+
+// Iterate over all keys.
+db.iterate((key, data, dataOffset) -> {
+    // Read 28 bytes starting at dataOffset in data[]. 
+});
+
+// Close.
+db.close();
+```
+
 ## Limitations
 - Key sizes are restricted to 4 bytes (they're stored as integers internally)
 - A database must be opened indicating the value size
