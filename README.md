@@ -1,12 +1,11 @@
 # StormDB
 An embeddable, persistent key-value store optimised for sequential reads.
 
-**Important Notice:** This database is under heavy development,
-and is not yet ready for production usage.
-
 [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=CleverTap_stormdb&metric=alert_status)](https://sonarcloud.io/dashboard?id=CleverTap_stormdb)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=CleverTap_stormdb&metric=coverage)](https://sonarcloud.io/dashboard?id=CleverTap_stormdb)
 [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=CleverTap_stormdb&metric=security_rating)](https://sonarcloud.io/dashboard?id=CleverTap_stormdb)
+
+**Current Status:** Used in production by CleverTap.
 
 ## Goals
 - High speed sequential read
@@ -26,7 +25,7 @@ We ran a small benchmark for 100 million 4 byte keys with 28 byte values, and th
 **Note:** We've only compared this with RocksDB since in all our previous benchmarks, 
 we've observed that RocksDB was the fastest.
 
-More details about this benchmark may be found [here](wiki/Blocks).
+More details about this benchmark may be found [here](wiki/Benchmarks).
 
 ## Motivation
 The primary motivation behind StormDB was to achieve fast sequential scans across all keys
@@ -65,8 +64,7 @@ its implementation.
 
 A few pointers
 - Style Guide: [_Google Style_](https://google.github.io/styleguide/javaguide.html) 
-
-// TODO: More to come here.
+- SonarCloud quality gate
 
 ## Maintainers
 StormDB is maintained by the CleverTap Labs team, with contributions
