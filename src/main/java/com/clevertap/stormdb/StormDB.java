@@ -649,7 +649,7 @@ public class StormDB {
         final long address;
         try {
             recordIndex = index.get(key);
-            if (recordIndex == IndexMap.NO_ENTRY_INDEX_VALUE) { // No mapping value.
+            if (recordIndex == RESERVED_KEY_MARKER) { // No mapping value.
                 return null; // NOSONAR - returning null is a part of the interface.
             }
 
