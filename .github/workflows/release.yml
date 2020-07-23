@@ -25,20 +25,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-maven-
 
-      - name: Create settings.xml
-        run: |
-          echo "<settings>
-          <servers>
-          <server>
-          <id>bintray-clevertap-Maven</id>
-          <username>${env.BINTRAY_USERNAME}</username>
-          <password>${env.BINTRAY_API_KEY}</password>
-          </server>
-          </servers>
-          </settings>" > settings.xml
-
       - name: Deploy
-        run: mvn --file pom.xml -s settings.xml deploy
+        run: mvn --file pom.xml -s release/m2-settings.xml deploy
         env:
           BINTRAY_USERNAME: ${{ secrets.BINTRAY_USERNAME }}
           BINTRAY_API_KEY: ${{ secrets.BINTRAY_API_KEY }}
