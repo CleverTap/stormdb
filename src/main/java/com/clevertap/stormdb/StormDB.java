@@ -33,6 +33,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import gnu.trove.map.hash.TIntIntHashMap;
 
 /**
  * Protocol: key (4 bytes) | value (fixed bytes).
@@ -59,6 +60,8 @@ public class StormDB {
     private final IndexMap index;
 
     private BitSet dataInWalFile = new BitSet();
+
+    private TIntIntHashMap keyInMemoryBuffer = new TIntIntHashMap();
 
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
@@ -502,6 +505,13 @@ public class StormDB {
         rwLock.writeLock().lock();
 
         try {
+            boolean updatedInPlace = false;
+            if (keyInMemoryBuffer.contains(key)) {
+                // address in memory buffer for the given key
+                int storedAddressForKey = keyInMemoryBuffer.get(key);
+                updatedInPlace = buffer.update(key, value, valueOffset, storedAddressForKey);
+            }
+
             if (buffer.isFull()) {
                 flush();
                 // Let compaction thread eval if there is a need for compaction.
@@ -512,11 +522,15 @@ public class StormDB {
             }
 
             // Write to the write buffer.
-            final int addressInBuffer = buffer.add(key, value, valueOffset);
+            if (!updatedInPlace) {
+                final int addressInBuffer = buffer.add(key, value, valueOffset);
 
-            final int recordIndex = RecordUtil.addressToIndex(recordSize,
+                keyInMemoryBuffer.put(key, addressInBuffer);
+
+                final int recordIndex = RecordUtil.addressToIndex(recordSize,
                     bytesInWalFile + addressInBuffer);
-            index.put(key, recordIndex);
+                index.put(key, recordIndex);
+            }
 
             if (isCompactionInProgress()) {
                 compactionState.dataInNextWalFile.set(key);
@@ -539,6 +553,7 @@ public class StormDB {
 
             bytesInWalFile += buffer.flush(walOut);
             buffer.clear();
+            keyInMemoryBuffer.clear();
 
             lastBufferFlushTimeMs = System.currentTimeMillis();
 

@@ -715,4 +715,40 @@ class StormDBTest {
             e.printStackTrace();
         }
     }
+
+    @Test
+    void testInMemoryUpdate() throws IOException, StormDBException {
+        final Path path = Files.createTempDirectory("stormdb");
+
+        final int valueSize = 28;
+        final StormDB db = new StormDBBuilder()
+            .withDbDir(path.toString())
+            .withValueSize(valueSize)
+            .withAutoCompactDisabled()
+            .build();
+
+        assertEquals(0, db.size());
+
+        int[] keysToInsert = {1, 2, 3, 1, 2};
+        int[] valuesToInsert = {10, 11, 12, 13, 14};
+        for (int i = 0; i < keysToInsert.length; i++) {
+            final ByteBuffer value = ByteBuffer.allocate(valueSize);
+            value.putInt(valuesToInsert[i]);
+            db.put(keysToInsert[i], value.array());
+            value.clear();
+        }
+        byte[] storedValueBytes = db.randomGet(1);
+        ByteBuffer storedValue = ByteBuffer.wrap(storedValueBytes);
+        assertEquals(13, storedValue.getInt());
+
+        storedValueBytes = db.randomGet(2);
+        storedValue = ByteBuffer.wrap(storedValueBytes);
+        assertEquals(14, storedValue.getInt());
+
+        db.iterate((key, data, offset) -> {
+            final ByteBuffer value = ByteBuffer.wrap(data, offset, valueSize);
+        });
+
+        assertEquals(3, db.size());
+    }
 }

@@ -203,6 +203,25 @@ public class Buffer {
     }
 
     /**
+     * Checks the key at the given offset and updates its value with newValue otherwise return false
+     */
+    boolean update(int key, byte[] newValue, int valueOffset, int addressInBuffer) {
+        int savedKey = byteBuffer.getInt(addressInBuffer);
+        if (savedKey != key) {
+            return false;
+        }
+        // get current position in buffer
+        int currentPosition = byteBuffer.position();
+
+        byteBuffer.position(addressInBuffer + KEY_SIZE);
+        byteBuffer.put(newValue, valueOffset, valueSize);
+
+        // change the buffer position to its position before changing
+        byteBuffer.position(currentPosition);
+        return true;
+    }
+
+    /**
      * Always call this from a synchronised context, since it will provide a snapshot of data in the
      * current buffer.
      */
