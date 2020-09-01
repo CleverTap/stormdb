@@ -210,14 +210,7 @@ public class Buffer {
         if (savedKey != key) {
             return false;
         }
-        // get current position in buffer
-        int currentPosition = byteBuffer.position();
-
-        byteBuffer.position(addressInBuffer + KEY_SIZE);
-        byteBuffer.put(newValue, valueOffset, valueSize);
-
-        // change the buffer position to its position before changing
-        byteBuffer.position(currentPosition);
+        System.arraycopy(newValue, valueOffset, byteBuffer.array(), addressInBuffer + KEY_SIZE, valueSize);
         return true;
     }
 

@@ -731,11 +731,13 @@ class StormDBTest {
 
         int[] keysToInsert = {1, 2, 3, 1, 2};
         int[] valuesToInsert = {10, 11, 12, 13, 14};
+        HashMap<Integer, Integer> keyValue = new HashMap<>();
         for (int i = 0; i < keysToInsert.length; i++) {
             final ByteBuffer value = ByteBuffer.allocate(valueSize);
             value.putInt(valuesToInsert[i]);
             db.put(keysToInsert[i], value.array());
             value.clear();
+            keyValue.put(keysToInsert[i], valuesToInsert[i]);
         }
         byte[] storedValueBytes = db.randomGet(1);
         ByteBuffer storedValue = ByteBuffer.wrap(storedValueBytes);
@@ -747,8 +749,8 @@ class StormDBTest {
 
         db.iterate((key, data, offset) -> {
             final ByteBuffer value = ByteBuffer.wrap(data, offset, valueSize);
+            assertEquals(keyValue.get(key), value.getInt());
         });
-
         assertEquals(3, db.size());
     }
 }

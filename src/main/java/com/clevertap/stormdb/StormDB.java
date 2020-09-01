@@ -61,8 +61,6 @@ public class StormDB {
 
     private BitSet dataInWalFile = new BitSet();
 
-    private TIntIntHashMap keyInMemoryBuffer = new TIntIntHashMap();
-
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
     private final RandomAccessFilePool filePool;
@@ -506,10 +504,17 @@ public class StormDB {
 
         try {
             boolean updatedInPlace = false;
-            if (keyInMemoryBuffer.contains(key)) {
-                // address in memory buffer for the given key
-                int storedAddressForKey = keyInMemoryBuffer.get(key);
-                updatedInPlace = buffer.update(key, value, valueOffset, storedAddressForKey);
+
+            final int recordIndexForKey = index.get(key);
+
+            if (recordIndexForKey != RESERVED_KEY_MARKER) { // It means key exist
+                if ((isCompactionInProgress() && compactionState.dataInNextWalFile.get(key)) || (!isCompactionInProgress() && dataInWalFile.get(key))) {
+                    long address =  RecordUtil.indexToAddress(recordSize, recordIndexForKey);
+                    if (address >= bytesInWalFile) { // i.e data is in the buffer
+                        int addressToUpdateForKey = (int)(address - bytesInWalFile);
+                        updatedInPlace = buffer.update(key, value, valueOffset, addressToUpdateForKey);
+                    }
+                }
             }
 
             if (buffer.isFull()) {
@@ -525,7 +530,6 @@ public class StormDB {
             if (!updatedInPlace) {
                 final int addressInBuffer = buffer.add(key, value, valueOffset);
 
-                keyInMemoryBuffer.put(key, addressInBuffer);
 
                 final int recordIndex = RecordUtil.addressToIndex(recordSize,
                     bytesInWalFile + addressInBuffer);
@@ -553,7 +557,6 @@ public class StormDB {
 
             bytesInWalFile += buffer.flush(walOut);
             buffer.clear();
-            keyInMemoryBuffer.clear();
 
             lastBufferFlushTimeMs = System.currentTimeMillis();
 
