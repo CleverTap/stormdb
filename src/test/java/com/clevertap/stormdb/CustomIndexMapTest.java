@@ -33,6 +33,9 @@ class CustomIndexMapTest {
                     @Override
                     public int get(int key) {
                         activityCount[1]++;
+                        if (!kvCache.containsKey(key)) {
+                            return StormDB.RESERVED_KEY_MARKER;
+                        }
                         return kvCache.get(key);
                     }
 
