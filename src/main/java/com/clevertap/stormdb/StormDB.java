@@ -33,7 +33,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import gnu.trove.map.hash.TIntIntHashMap;
 
 /**
  * Protocol: key (4 bytes) | value (fixed bytes).
@@ -507,13 +506,11 @@ public class StormDB {
 
             final int recordIndexForKey = index.get(key);
 
-            if (recordIndexForKey != RESERVED_KEY_MARKER) { // It means key exist
-                if ((isCompactionInProgress() && compactionState.dataInNextWalFile.get(key)) || (!isCompactionInProgress() && dataInWalFile.get(key))) {
-                    long address =  RecordUtil.indexToAddress(recordSize, recordIndexForKey);
-                    if (address >= bytesInWalFile) { // i.e data is in the buffer
-                        int addressToUpdateForKey = (int)(address - bytesInWalFile);
-                        updatedInPlace = buffer.update(key, value, valueOffset, addressToUpdateForKey);
-                    }
+            if ((recordIndexForKey != RESERVED_KEY_MARKER) && ((isCompactionInProgress() && compactionState.dataInNextWalFile.get(key)) || (!isCompactionInProgress() && dataInWalFile.get(key)))) { // It means key exist
+                long address =  RecordUtil.indexToAddress(recordSize, recordIndexForKey);
+                if (address >= bytesInWalFile) { // i.e data is in the buffer
+                    int addressToUpdateForKey = (int)(address - bytesInWalFile);
+                    updatedInPlace = buffer.update(key, value, valueOffset, addressToUpdateForKey);
                 }
             }
 
