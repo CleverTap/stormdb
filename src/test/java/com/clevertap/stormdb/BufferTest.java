@@ -388,4 +388,12 @@ class BufferTest {
 
         assertThrows(StormDBRuntimeException.class, () -> buffer.readFromFile(raf, true, null));
     }
+
+    @Test
+    void testUpdateBuffer() throws IOException {
+        final Buffer buffer = newWriteBuffer(28);
+        buffer.add(10, new byte[28], 0);
+        assertTrue(buffer.update(10, new byte[28], 0, 32)); // 32 because first will be RESERVED_KEY_MARKER
+        assertFalse(buffer.update(10, new byte[28], 0, 64));
+    }
 }
