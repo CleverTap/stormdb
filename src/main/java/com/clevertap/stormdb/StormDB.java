@@ -506,7 +506,8 @@ public class StormDB {
 
             final int recordIndexForKey = index.get(key);
 
-            if ((recordIndexForKey != RESERVED_KEY_MARKER) && ((isCompactionInProgress() && compactionState.dataInNextWalFile.get(key)) || (!isCompactionInProgress() && dataInWalFile.get(key)))) { // It means key exist
+            // Check if the key exists in the WAL file.
+            if ((recordIndexForKey != RESERVED_KEY_MARKER) && ((isCompactionInProgress() && compactionState.dataInNextWalFile.get(key)) || (!isCompactionInProgress() && dataInWalFile.get(key)))) {
                 long address =  RecordUtil.indexToAddress(recordSize, recordIndexForKey);
                 if (address >= bytesInWalFile) { // i.e data is in the buffer
                     int addressToUpdateForKey = (int)(address - bytesInWalFile);
