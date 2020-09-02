@@ -203,6 +203,24 @@ public class Buffer {
     }
 
     /**
+     * Attempts to update a key in the in-memory buffer after verifying the key.
+     *
+     * @param key             The key to be updated
+     * @param newValue        The byte array containing the new value
+     * @param valueOffset     The offset in the value byte array
+     * @param addressInBuffer The address in the buffer at which the key value pair exists
+     * @return true if the update succeeds after key verification, false otherwise
+     */
+    boolean update(int key, byte[] newValue, int valueOffset, int addressInBuffer) {
+        int savedKey = byteBuffer.getInt(addressInBuffer);
+        if (savedKey != key) {
+            return false;
+        }
+        System.arraycopy(newValue, valueOffset, byteBuffer.array(), addressInBuffer + KEY_SIZE, valueSize);
+        return true;
+    }
+
+    /**
      * Always call this from a synchronised context, since it will provide a snapshot of data in the
      * current buffer.
      */

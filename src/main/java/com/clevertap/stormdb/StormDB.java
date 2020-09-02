@@ -502,6 +502,20 @@ public class StormDB {
         rwLock.writeLock().lock();
 
         try {
+            boolean updatedInPlace = false;
+
+            final int recordIndexForKey = index.get(key);
+
+            // Check if the key exists in the WAL file.
+            if ((recordIndexForKey != RESERVED_KEY_MARKER) && ((isCompactionInProgress() && compactionState.dataInNextWalFile.get(key)) || (!isCompactionInProgress() && dataInWalFile.get(key)))) {
+                long address =  RecordUtil.indexToAddress(recordSize, recordIndexForKey);
+                // Is the record in the buffer?
+                if (address >= bytesInWalFile) {
+                    int addressToUpdateForKey = (int)(address - bytesInWalFile);
+                    updatedInPlace = buffer.update(key, value, valueOffset, addressToUpdateForKey);
+                }
+            }
+
             if (buffer.isFull()) {
                 flush();
                 // Let compaction thread eval if there is a need for compaction.
@@ -512,11 +526,14 @@ public class StormDB {
             }
 
             // Write to the write buffer.
-            final int addressInBuffer = buffer.add(key, value, valueOffset);
+            if (!updatedInPlace) {
+                final int addressInBuffer = buffer.add(key, value, valueOffset);
 
-            final int recordIndex = RecordUtil.addressToIndex(recordSize,
+
+                final int recordIndex = RecordUtil.addressToIndex(recordSize,
                     bytesInWalFile + addressInBuffer);
-            index.put(key, recordIndex);
+                index.put(key, recordIndex);
+            }
 
             if (isCompactionInProgress()) {
                 compactionState.dataInNextWalFile.set(key);
