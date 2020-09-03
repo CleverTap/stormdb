@@ -6,7 +6,7 @@
 
     <groupId>com.clevertap</groupId>
     <artifactId>stormdb</artifactId>
-    <version>1.1.0</version>
+    <version>1.2.0</version>
 
     <properties>
         <sonar.projectKey>CleverTap_stormdb</sonar.projectKey>
