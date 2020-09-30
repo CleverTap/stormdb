@@ -10,6 +10,8 @@ import com.clevertap.stormdb.maps.IndexMap;
 import com.clevertap.stormdb.internal.RandomAccessFilePool;
 import com.clevertap.stormdb.utils.ByteUtil;
 import com.clevertap.stormdb.utils.RecordUtil;
+import gnu.trove.procedure.TIntProcedure;
+import gnu.trove.set.hash.TIntHashSet;
 import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
@@ -50,6 +52,7 @@ public class StormDB {
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
     private static final String FILE_TYPE_NEXT = ".next";
+    private static final String FILE_NAME_DELETED_KEYS = "keysDeleted";
 
     /**
      * Key: The actual key within this KV store.
@@ -57,6 +60,11 @@ public class StormDB {
      * Value: The offset (either in the data file, or in the WAL file)
      */
     private final IndexMap index;
+
+    /**
+     * Set to hold keys that have been deleted so far
+     */
+    private final TIntHashSet deletedKeysSet = new TIntHashSet();
 
     private BitSet dataInWalFile = new BitSet();
 
@@ -76,8 +84,10 @@ public class StormDB {
 
     private File dataFile;
     private File walFile;
+    private File deletedKeysFile;
 
     private DataOutputStream walOut;
+    private DataOutputStream deleteKeysOut;
 
     private Thread tWorker;
     private final Object compactionSync;
@@ -116,6 +126,7 @@ public class StormDB {
 
         dataFile = new File(dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_DATA);
         walFile = new File(dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_WAL);
+        deletedKeysFile = new File(dbDirFile.getAbsoluteFile() + File.separator + FILE_NAME_DELETED_KEYS);
 
         // Open DB.
         final File metaFile = new File(conf.getDbDir() + "/meta");
@@ -138,6 +149,7 @@ public class StormDB {
         }
 
         initWalOut();
+        initDeletedKeyOut();
 
         recover();
         buildIndex();
@@ -229,6 +241,10 @@ public class StormDB {
     private void initWalOut() throws FileNotFoundException {
         walOut = new DataOutputStream(new FileOutputStream(walFile, true));
         bytesInWalFile = walFile.length();
+    }
+
+    private void initDeletedKeyOut() throws  FileNotFoundException {
+        deleteKeysOut = new DataOutputStream(new FileOutputStream(deletedKeysFile, true));
     }
 
     private boolean shouldFlushBuffer() {
@@ -387,6 +403,7 @@ public class StormDB {
                 // This is because we will be resetting bytesInWalFile below and we need to get all
                 // buffer to file so that their offsets are honoured.
                 flush();
+                flushDeletedKeys();
 
                 LOG.info("Beginning compaction with bytesInWalFile={}", bytesInWalFile);
                 // Check whether there was any data coming in. If not simply bail out.
@@ -399,8 +416,11 @@ public class StormDB {
                 compactionState.nextWalFile = new File(dbDirFile.getAbsolutePath()
                         + File.separator + FILE_NAME_WAL + FILE_TYPE_NEXT);
 
+                compactionState.nextDeletedKeysFile = new File(dbDirFile.getAbsoluteFile() + File.separator + FILE_NAME_DELETED_KEYS + FILE_TYPE_NEXT);
+
                 // Create new walOut File
                 walOut = new DataOutputStream(new FileOutputStream(compactionState.nextWalFile));
+                deleteKeysOut = new DataOutputStream(new FileOutputStream(compactionState.nextDeletedKeysFile));
                 bytesInWalFile = 0;
                 compactionState.nextFileRecordIndex = 0;
 
@@ -413,6 +433,8 @@ public class StormDB {
             compactionState.nextDataFile = new File(dbDirFile.getAbsolutePath() + File.separator +
                     FILE_NAME_DATA + FILE_TYPE_NEXT);
 
+            // 1. read delete file and create a set for deleted keys
+            // 2. move the new file to previous delete file
             try (final BufferedOutputStream out =
                     new BufferedOutputStream(new FileOutputStream(compactionState.nextDataFile),
                             buffer.getWriteBufferSize())) {
@@ -437,6 +459,7 @@ public class StormDB {
                 // First rename prevWalFile and prevDataFile so that .next can be renamed
                 walFile = move(compactionState.nextWalFile, walFile).toFile();
                 dataFile = move(compactionState.nextDataFile, dataFile).toFile();
+                deletedKeysFile = move(compactionState.nextDeletedKeysFile, deletedKeysFile).toFile();
 
                 // Now make bitsets point right.
                 dataInWalFile = compactionState.dataInNextWalFile;
@@ -571,6 +594,63 @@ public class StormDB {
         }
     }
 
+    private void readFromDeletedKeysFile(RandomAccessFile file, Consumer<Integer> entryConsumer) throws IOException{
+        ByteBuffer bufferDeletedKeys = ByteBuffer.allocate(4); // will hold 10 keys
+        while(true) {
+            bufferDeletedKeys.clear();
+            final int bytesRead = file.read(bufferDeletedKeys.array());
+            if (bytesRead == -1) {
+                break;
+            }
+            entryConsumer.accept(bufferDeletedKeys.getInt());
+        }
+    }
+
+    private TIntHashSet getKeysToBeDeletedFromFile(final boolean useLatestWalFile, final boolean readInMemoryBuffer) throws IOException{
+        TIntHashSet keysToBeDeleted = new TIntHashSet();
+
+        Consumer<Integer> entryConsumer = keyToBeDeleted -> {
+            int address = index.get(keyToBeDeleted);
+            if (address == RESERVED_KEY_MARKER) {
+                // delete only when key is not set in index
+                // because a set value will itself overwrite previous value so no need to delete
+                keysToBeDeleted.add(keyToBeDeleted);
+            }
+        };
+
+        final ArrayList<RandomAccessFile> filesToRead = new ArrayList<>(2);
+
+        if (isCompactionInProgress() && useLatestWalFile && compactionState.nextDeletedKeysFile.exists()) {
+            final RandomAccessFileWrapper reader = filePool.borrowObject(compactionState.nextDeletedKeysFile);
+            reader.seek(0);
+            filesToRead.add(reader);
+        }
+
+        if (deletedKeysFile.exists()) {
+            final RandomAccessFileWrapper reader = filePool.borrowObject(deletedKeysFile);
+            reader.seek(0);
+            filesToRead.add(reader);
+        }
+
+        if (readInMemoryBuffer) {
+            deletedKeysSet.forEach(new TIntProcedure() {
+                @Override
+                public boolean execute(int i) {
+                    entryConsumer.accept(i);
+                    return true;
+                }
+            });
+        }
+        // read from the deletedKeysFile
+        for (RandomAccessFile file: filesToRead) {
+            readFromDeletedKeysFile(file, entryConsumer);
+            filePool.returnObject(((RandomAccessFileWrapper) file).getFile(),
+                (RandomAccessFileWrapper) file);
+        }
+
+        return keysToBeDeleted;
+    }
+
     public void iterate(final EntryConsumer consumer) throws IOException {
         iterate(true, true, consumer);
     }
@@ -609,11 +689,14 @@ public class StormDB {
             rwLock.readLock().unlock();
         }
 
+        // first iterate over the deleteKeys file and create a set out of that and then use that set with index to check if a key should be deleted or not
+        TIntHashSet keysToBeDeleted = getKeysToBeDeletedFromFile(useLatestWalFile, readInMemoryBuffer);
+
         final BitSet keysRead = new BitSet(index.size());
 
         final Consumer<ByteBuffer> entryConsumer = entry -> {
             final int key = entry.getInt();
-            final boolean b = keysRead.get(key);
+            final boolean b = keysRead.get(key) || keysToBeDeleted.contains(key);
             if (!b) {
                 try {
                     consumer.accept(key, entry.array(), entry.position());
@@ -715,6 +798,49 @@ public class StormDB {
             return value;
         } finally {
             filePool.returnObject(f.getFile(), f);
+        }
+    }
+
+    private void flushDeletedKeys() throws IOException {
+        // flush the deleteSet keys to file
+        rwLock.writeLock().lock();
+        try {
+            if (deleteKeysOut == null || deletedKeysSet.isEmpty()) {
+                return;
+            }
+
+            ByteBuffer deletedKeysBuffer = ByteBuffer.allocate(4 * deletedKeysSet.size());
+
+            deletedKeysSet.forEach(new TIntProcedure() {
+                @Override
+                public boolean execute(int key) {
+                    deletedKeysBuffer.putInt(key);
+                    return true;
+                }
+            });
+
+            deleteKeysOut.write(deletedKeysBuffer.array(), 0, deletedKeysBuffer.position());
+            deleteKeysOut.flush();
+        } finally {
+            rwLock.writeLock().unlock();
+        }
+        deletedKeysSet.clear();
+    }
+
+
+    public void remove(int key) throws IOException, StormDBException {
+
+        final int recordIndexForKey = index.get(key);
+        if (recordIndexForKey == RESERVED_KEY_MARKER) {
+            return; // no deletion
+        }
+
+        deletedKeysSet.add(key);
+        index.remove(key);
+
+        if (deletedKeysSet.size() >= Config.MAX_KEYS_IN_SET_FOR_DELETION) {
+            // write to file
+            flushDeletedKeys();
         }
     }
 

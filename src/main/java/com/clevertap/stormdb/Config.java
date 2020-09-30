@@ -39,6 +39,8 @@ public class Config {
     static final int MIN_OPEN_FD_COUNT = 1;
     static final int MAX_OPEN_FD_COUNT = 100;
 
+    static final int MAX_KEYS_IN_SET_FOR_DELETION = 20; // every 20 keys write to deletion files
+
     // Must have parameters
     boolean autoCompact = true;
     int valueSize;

@@ -43,6 +43,11 @@ class CustomIndexMapTest {
                     public int size() {
                         return kvCache.size();
                     }
+
+                    @Override
+                    public int remove(int key) {
+                        return kvCache.remove(key);
+                    }
                 })
                 .build();
 

@@ -716,16 +716,23 @@ class StormDBTest {
         }
     }
 
-    @Test
-    void testInMemoryUpdate() throws IOException, StormDBException {
+    StormDB getStormDBInstance(final int valueSize) throws IOException{
         final Path path = Files.createTempDirectory("stormdb");
 
-        final int valueSize = 28;
         final StormDB db = new StormDBBuilder()
             .withDbDir(path.toString())
             .withValueSize(valueSize)
             .withAutoCompactDisabled()
             .build();
+
+        return db;
+    }
+
+    @Test
+    void testInMemoryUpdate() throws IOException, StormDBException {
+        final int valueSize = 28;
+
+        StormDB db = getStormDBInstance(valueSize);
 
         assertEquals(0, db.size());
 
@@ -752,5 +759,59 @@ class StormDBTest {
             assertEquals(keyValue.get(key), value.getInt());
         });
         assertEquals(3, db.size());
+    }
+
+    @Test
+    public void testKeysDeletion() throws IOException, StormDBException{
+        final int valueSize = 28;
+        StormDB db = getStormDBInstance(valueSize);
+        // insert some keys
+        int totalEntries = 115;
+        ByteBuffer value = ByteBuffer.allocate(valueSize);
+        for (int i = 1; i <= totalEntries; i++) {
+            value.clear();
+            value.putInt(i);
+            db.put(i, value.array());
+        }
+
+        int[] total = {0};
+
+        db.iterate((key, data, offset) -> {
+            ByteBuffer dataValue = ByteBuffer.wrap(data, offset, valueSize);
+            assertEquals(key,   dataValue.getInt());
+            total[0]++;
+        });
+
+        assertEquals(totalEntries, total[0]);
+        // now delete every even number
+        total[0] = 0;
+
+        // simple deletion
+        for (int i = 1;i <= totalEntries; i++) {
+            if (i%2 == 0) {
+                db.remove(i);
+            }
+            if (i % 3 == 0) {
+                value.clear();
+                value.putInt(i);
+                db.put(i, value.array());
+            }
+        }
+        db.iterate((key, data, offset) -> {
+            ByteBuffer dataValue = ByteBuffer.wrap(data, offset, valueSize);
+            assertEquals(key,   dataValue.getInt());
+            total[0]++;
+        });
+        assertEquals(77, total[0]);
+
+        // compaction based deletion
+        db.compact();
+        total[0] = 0;
+        db.iterate((key, data, offset) -> {
+            ByteBuffer dataValue = ByteBuffer.wrap(data, offset, valueSize);
+            assertEquals(key,   dataValue.getInt());
+            total[0]++;
+        });
+        assertEquals(77, total[0]);
     }
 }

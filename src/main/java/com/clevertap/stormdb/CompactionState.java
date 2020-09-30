@@ -14,6 +14,7 @@ class CompactionState {
 
     File nextWalFile;
     File nextDataFile;
+    File nextDeletedKeysFile;
 
     boolean runningForTooLong() {
         return System.currentTimeMillis() - start > 30 * 60 * 1000;

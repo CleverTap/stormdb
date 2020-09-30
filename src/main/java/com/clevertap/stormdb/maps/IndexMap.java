@@ -26,4 +26,11 @@ public interface IndexMap {
      * @return Size of the index.
      */
     int size();
+
+    /**
+     * API to support key deletion from the map
+     * @param key The key to be deleted
+     * @return
+     */
+    int remove(int key);
 }
