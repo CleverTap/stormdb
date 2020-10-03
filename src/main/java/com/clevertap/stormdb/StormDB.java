@@ -15,6 +15,7 @@ import gnu.trove.set.hash.TIntHashSet;
 import java.io.BufferedOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -370,6 +371,15 @@ public class StormDB {
         }
 
         dataFile = BlockUtil.verifyBlocks(dataFile, conf.getValueSize());
+
+        // now check for deletedKeysFile
+        final File nextDeletedKeysFile = new File(dbDirFile.getAbsolutePath() + File.separator + FILE_NAME_DELETED_KEYS + FILE_TYPE_NEXT);
+
+        if (nextDeletedKeysFile.exists()) {
+            Files.copy(nextDeletedKeysFile.toPath(), deleteKeysOut);
+            deleteKeysOut.flush();
+            Files.delete(nextDeletedKeysFile.toPath());
+        }
     }
 
     /**
@@ -594,11 +604,12 @@ public class StormDB {
         }
     }
 
-    private void readFromDeletedKeysFile(RandomAccessFile file, Consumer<Integer> entryConsumer) throws IOException{
-        ByteBuffer bufferDeletedKeys = ByteBuffer.allocate(4); // will hold 10 keys
+    private void readFromDeletedKeysFile(File file, Consumer<Integer> entryConsumer) throws IOException{
+        ByteBuffer bufferDeletedKeys = ByteBuffer.allocate(4);
+        FileInputStream inputStream = new FileInputStream(file);
         while(true) {
             bufferDeletedKeys.clear();
-            final int bytesRead = file.read(bufferDeletedKeys.array());
+            final int bytesRead = inputStream.read(bufferDeletedKeys.array());
             if (bytesRead == -1) {
                 break;
             }
@@ -610,26 +621,22 @@ public class StormDB {
         TIntHashSet keysToBeDeleted = new TIntHashSet();
 
         Consumer<Integer> entryConsumer = keyToBeDeleted -> {
-            int address = index.get(keyToBeDeleted);
-            if (address == RESERVED_KEY_MARKER) {
+            boolean keyDeleted = index.get(keyToBeDeleted) == RESERVED_KEY_MARKER;
+            if (keyDeleted) {
                 // delete only when key is not set in index
                 // because a set value will itself overwrite previous value so no need to delete
                 keysToBeDeleted.add(keyToBeDeleted);
             }
         };
 
-        final ArrayList<RandomAccessFile> filesToRead = new ArrayList<>(2);
+        final ArrayList<File> filesToRead = new ArrayList<>(2);
 
         if (isCompactionInProgress() && useLatestWalFile && compactionState.nextDeletedKeysFile.exists()) {
-            final RandomAccessFileWrapper reader = filePool.borrowObject(compactionState.nextDeletedKeysFile);
-            reader.seek(0);
-            filesToRead.add(reader);
+            filesToRead.add(compactionState.nextDeletedKeysFile);
         }
 
         if (deletedKeysFile.exists()) {
-            final RandomAccessFileWrapper reader = filePool.borrowObject(deletedKeysFile);
-            reader.seek(0);
-            filesToRead.add(reader);
+            filesToRead.add(deletedKeysFile);
         }
 
         if (readInMemoryBuffer) {
@@ -642,10 +649,8 @@ public class StormDB {
             });
         }
         // read from the deletedKeysFile
-        for (RandomAccessFile file: filesToRead) {
+        for (File file: filesToRead) {
             readFromDeletedKeysFile(file, entryConsumer);
-            filePool.returnObject(((RandomAccessFileWrapper) file).getFile(),
-                (RandomAccessFileWrapper) file);
         }
 
         return keysToBeDeleted;

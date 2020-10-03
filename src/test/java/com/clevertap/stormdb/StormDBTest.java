@@ -716,8 +716,7 @@ class StormDBTest {
         }
     }
 
-    StormDB getStormDBInstance(final int valueSize) throws IOException{
-        final Path path = Files.createTempDirectory("stormdb");
+    StormDB getStormDBInstance(final int valueSize, final Path path) throws IOException{
 
         final StormDB db = new StormDBBuilder()
             .withDbDir(path.toString())
@@ -732,7 +731,8 @@ class StormDBTest {
     void testInMemoryUpdate() throws IOException, StormDBException {
         final int valueSize = 28;
 
-        StormDB db = getStormDBInstance(valueSize);
+        final Path path = Files.createTempDirectory("stormdb");
+        StormDB db = getStormDBInstance(valueSize, path);
 
         assertEquals(0, db.size());
 
@@ -762,9 +762,11 @@ class StormDBTest {
     }
 
     @Test
-    public void testKeysDeletion() throws IOException, StormDBException{
+    public void testKeysDeletion() throws IOException, StormDBException, InterruptedException{
         final int valueSize = 28;
-        StormDB db = getStormDBInstance(valueSize);
+        final Path path = Files.createTempDirectory("stormdb");
+        StormDB db = getStormDBInstance(valueSize, path);
+        String dbPath = db.getConf().getDbDir();
         // insert some keys
         int totalEntries = 115;
         ByteBuffer value = ByteBuffer.allocate(valueSize);
@@ -807,6 +809,11 @@ class StormDBTest {
         // compaction based deletion
         db.compact();
         total[0] = 0;
+
+        db.close();
+
+        db = getStormDBInstance(28, path);
+
         db.iterate((key, data, offset) -> {
             ByteBuffer dataValue = ByteBuffer.wrap(data, offset, valueSize);
             assertEquals(key,   dataValue.getInt());
