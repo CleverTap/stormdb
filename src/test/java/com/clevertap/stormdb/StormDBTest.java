@@ -762,7 +762,7 @@ class StormDBTest {
     }
 
     @Test
-    public void testKeysDeletion() throws IOException, StormDBException, InterruptedException{
+    void testKeysDeletion() throws IOException, StormDBException, InterruptedException{
         final int valueSize = 28;
         final Path path = Files.createTempDirectory("stormdb");
         StormDB db = getStormDBInstance(valueSize, path);

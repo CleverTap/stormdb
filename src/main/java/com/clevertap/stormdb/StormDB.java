@@ -34,6 +34,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -604,28 +605,29 @@ public class StormDB {
         }
     }
 
-    private void readFromDeletedKeysFile(File file, Consumer<Integer> entryConsumer) throws IOException{
+    private void readFromDeletedKeysFile(File file, IntConsumer entryConsumer) throws IOException{
         ByteBuffer bufferDeletedKeys = ByteBuffer.allocate(4);
-        FileInputStream inputStream = new FileInputStream(file);
-        while(true) {
-            bufferDeletedKeys.clear();
-            final int bytesRead = inputStream.read(bufferDeletedKeys.array());
-            if (bytesRead == -1) {
-                break;
+
+        try (final FileInputStream inputStream = new FileInputStream(file)) {
+            while(true) {
+                bufferDeletedKeys.clear();
+                final int bytesRead = inputStream.read(bufferDeletedKeys.array());
+                if (bytesRead == -1) {
+                    break;
+                }
+                entryConsumer.accept(bufferDeletedKeys.getInt());
             }
-            entryConsumer.accept(bufferDeletedKeys.getInt());
         }
     }
 
-    private TIntHashSet getKeysToBeDeletedFromFile(final boolean useLatestWalFile, final boolean readInMemoryBuffer) throws IOException{
-        TIntHashSet keysToBeDeleted = new TIntHashSet();
+    private void getKeysToBeDeletedFromFile(final BitSet keysRead, final boolean useLatestWalFile, final boolean readInMemoryBuffer) throws IOException{
 
-        Consumer<Integer> entryConsumer = keyToBeDeleted -> {
+        IntConsumer entryConsumer = keyToBeDeleted -> {
             boolean keyDeleted = index.get(keyToBeDeleted) == RESERVED_KEY_MARKER;
             if (keyDeleted) {
                 // delete only when key is not set in index
                 // because a set value will itself overwrite previous value so no need to delete
-                keysToBeDeleted.add(keyToBeDeleted);
+                keysRead.set(keyToBeDeleted);
             }
         };
 
@@ -640,20 +642,15 @@ public class StormDB {
         }
 
         if (readInMemoryBuffer) {
-            deletedKeysSet.forEach(new TIntProcedure() {
-                @Override
-                public boolean execute(int i) {
-                    entryConsumer.accept(i);
-                    return true;
-                }
+            deletedKeysSet.forEach( key -> {
+                entryConsumer.accept(key);
+                return true;
             });
         }
         // read from the deletedKeysFile
         for (File file: filesToRead) {
             readFromDeletedKeysFile(file, entryConsumer);
         }
-
-        return keysToBeDeleted;
     }
 
     public void iterate(final EntryConsumer consumer) throws IOException {
@@ -695,13 +692,15 @@ public class StormDB {
         }
 
         // first iterate over the deleteKeys file and create a set out of that and then use that set with index to check if a key should be deleted or not
-        TIntHashSet keysToBeDeleted = getKeysToBeDeletedFromFile(useLatestWalFile, readInMemoryBuffer);
+
 
         final BitSet keysRead = new BitSet(index.size());
 
+        getKeysToBeDeletedFromFile(keysRead, useLatestWalFile, readInMemoryBuffer);
+
         final Consumer<ByteBuffer> entryConsumer = entry -> {
             final int key = entry.getInt();
-            final boolean b = keysRead.get(key) || keysToBeDeleted.contains(key);
+            final boolean b = keysRead.get(key);
             if (!b) {
                 try {
                     consumer.accept(key, entry.array(), entry.position());
@@ -816,12 +815,9 @@ public class StormDB {
 
             ByteBuffer deletedKeysBuffer = ByteBuffer.allocate(4 * deletedKeysSet.size());
 
-            deletedKeysSet.forEach(new TIntProcedure() {
-                @Override
-                public boolean execute(int key) {
-                    deletedKeysBuffer.putInt(key);
-                    return true;
-                }
+            deletedKeysSet.forEach(key -> {
+                deletedKeysBuffer.putInt(key);
+                return true;
             });
 
             deleteKeysOut.write(deletedKeysBuffer.array(), 0, deletedKeysBuffer.position());
@@ -833,7 +829,7 @@ public class StormDB {
     }
 
 
-    public void remove(int key) throws IOException, StormDBException {
+    public void remove(int key) throws IOException {
 
         final int recordIndexForKey = index.get(key);
         if (recordIndexForKey == RESERVED_KEY_MARKER) {
