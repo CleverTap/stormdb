@@ -851,6 +851,7 @@ public class StormDB {
 
     public void close() throws IOException, InterruptedException {
         flush();
+        flushDeletedKeys();
         shutDown = true;
         if (useExecutorService) {
             synchronized (instancesServed) {
