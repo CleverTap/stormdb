@@ -565,7 +565,7 @@ public class StormDB {
 
             index.remove(key);
 
-            ByteBuffer deletedKeyBuffer = ByteBuffer.allocate(recordSize);
+            ByteBuffer deletedKeyBuffer = ByteBuffer.allocate(conf.getValueSize());
             deletedKeyBuffer.putInt(key);
 
             if (buffer.isFull()) {
@@ -576,7 +576,6 @@ public class StormDB {
             }
 
             buffer.add(DELETED_KEY_MARKER, deletedKeyBuffer.array(), 0);
-
         } finally {
             rwLock.writeLock().unlock();
         }
