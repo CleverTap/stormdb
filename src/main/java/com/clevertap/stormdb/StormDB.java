@@ -46,6 +46,7 @@ import org.slf4j.LoggerFactory;
 public class StormDB {
 
     public static final int RESERVED_KEY_MARKER = 0xffffffff;
+    public static final int DELETED_KEY_MARKER = 0x80000000;
 
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
@@ -496,9 +497,10 @@ public class StormDB {
                     + "last compaction resulted in an exception!", exceptionDuringBackgroundOps);
         }
 
-        if (key == RESERVED_KEY_MARKER) {
-            throw new ReservedKeyException(RESERVED_KEY_MARKER);
+        if (key == RESERVED_KEY_MARKER  || key == DELETED_KEY_MARKER) {
+            throw new ReservedKeyException(key);
         }
+
         rwLock.writeLock().lock();
 
         try {
@@ -540,6 +542,40 @@ public class StormDB {
             } else {
                 dataInWalFile.set(key);
             }
+
+        } finally {
+            rwLock.writeLock().unlock();
+        }
+    }
+
+
+    public void remove(int key) throws IOException {
+
+        if (exceptionDuringBackgroundOps != null) {
+            throw new StormDBRuntimeException("Will not accept any further writes since the "
+                + "last compaction resulted in an exception!", exceptionDuringBackgroundOps);
+        }
+
+        if (key == RESERVED_KEY_MARKER || key == DELETED_KEY_MARKER) {
+            throw new ReservedKeyException(key);
+        }
+
+        rwLock.writeLock().lock();
+        try {
+
+            index.remove(key);
+
+            ByteBuffer deletedKeyBuffer = ByteBuffer.allocate(recordSize);
+            deletedKeyBuffer.putInt(key);
+
+            if (buffer.isFull()) {
+                flush();
+                synchronized (compactionSync) {
+                    compactionSync.notifyAll();
+                }
+            }
+
+            buffer.add(DELETED_KEY_MARKER, deletedKeyBuffer.array(), 0);
 
         } finally {
             rwLock.writeLock().unlock();
@@ -613,6 +649,14 @@ public class StormDB {
 
         final Consumer<ByteBuffer> entryConsumer = entry -> {
             final int key = entry.getInt();
+
+            // deleted key logic
+            if (key == DELETED_KEY_MARKER) {
+                final int deletedKey = entry.getInt();
+                keysRead.set(deletedKey);
+                return;
+            }
+
             final boolean b = keysRead.get(key);
             if (!b) {
                 try {
@@ -757,5 +801,9 @@ public class StormDB {
 
     public int size() {
         return index.size();
+    }
+
+    public static void main(String[] args) {
+        System.out.println(0x80000000);
     }
 }
