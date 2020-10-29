@@ -802,8 +802,4 @@ public class StormDB {
     public int size() {
         return index.size();
     }
-
-    public static void main(String[] args) {
-        System.out.println(0x80000000);
-    }
 }
