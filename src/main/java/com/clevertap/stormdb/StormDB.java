@@ -295,6 +295,15 @@ public class StormDB {
             try {
                 reader.readFromFile(wrapper, false, entry -> {
                     final int key = entry.getInt();
+
+                    if (key == DELETED_KEY_MARKER) {
+                        final int deletedKey = entry.getInt();
+                        index.remove(deletedKey);
+                        dataInWalFile.clear(deletedKey);
+                        fileIndex[0]++;
+                        return;
+                    }
+
                     index.put(key, fileIndex[0]++);
                     if (isWal) {
                         dataInWalFile.set(key);
