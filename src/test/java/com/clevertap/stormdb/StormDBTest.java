@@ -754,21 +754,25 @@ class StormDBTest {
         assertEquals(3, db.size());
     }
 
+    private byte[] getByteArrayForValueWithValueSize(int value, int valueSize) {
+        ByteBuffer valueBuffer = ByteBuffer.allocate(valueSize);
+        valueBuffer.putInt(value);
+        return valueBuffer.array();
+    }
+
     @Test
-    void testKeysDeletionNormal() throws IOException, StormDBException, InterruptedException{
+    void testKeysDeletionWithoutCompactionAndClose() throws IOException, StormDBException {
         final int valueSize = 28;
         final Path path = Files.createTempDirectory("stormdb");
         StormDB db = buildDB(path, valueSize);
         // insert some keys
         int totalEntries = 500000;
-        ByteBuffer value = ByteBuffer.allocate(valueSize);
+
         for (int i = 1; i <= totalEntries; i++) {
-            value.clear();
-            value.putInt(i);
-            db.put(i, value.array());
+            db.put(i, getByteArrayForValueWithValueSize(i, valueSize));
         }
 
-        assertEquals(totalEntries, db.size());
+        assertEquals(totalEntries, db.size()); // db size should match
 
         int[] total = {0};
 
@@ -785,51 +789,72 @@ class StormDBTest {
             if (i%2 == 0) {
                 db.remove(i);
             }
-            if (i % 1000 == 0) {
-                value.clear();
-                value.putInt(i);
-                db.put(i, value.array());
-            }
         }
 
         assertNotNull(db.randomGet(1));
         assertNull(db.randomGet(2));
-        assertEquals(totalEntries / 2 + 500, db.size()); // checking db size
-
-        db.close();
-
-        db = buildDB(path, valueSize);
-        total[0] = 0;
-
-        db.iterate((key, data, offset) -> {
-            if (key % 2 == 0) {
-                assertEquals(0, key % 1000);
-            }
-            ByteBuffer dataValue = ByteBuffer.wrap(data, offset, valueSize);
-            assertEquals(key, dataValue.getInt());
-            total[0]++;
-        });
-
-        assertNull(db.randomGet(4));
-        for (int i=1000;i < totalEntries; i+= 1000) {
-            value.clear();
-            value.putInt(i);
-            assertArrayEquals(value.array(), db.randomGet(i));
-        }
-        assertEquals(totalEntries / 2 + 500, total[0]);
+        assertEquals(totalEntries / 2, db.size()); // db size should become half
     }
 
     @Test
-    void testKeysDeletionComplex() throws IOException, StormDBException {
+    void testKeysDeletionWithDBClose() throws IOException, StormDBException, InterruptedException{
         final int valueSize = 28;
         final Path path = Files.createTempDirectory("stormdb");
         StormDB db = buildDB(path, valueSize);
 
-        ByteBuffer value = ByteBuffer.allocate(valueSize);
-        value.putInt(1);
-        db.put(1, value.array());
+        int totalEntries = 100;
+        for (int i = 1; i <= totalEntries; i++) {
+            db.put(i, getByteArrayForValueWithValueSize(i, valueSize));
+        }
+
+        assertEquals(totalEntries, db.size());
+
+        for (int i = 1; i <= totalEntries; i++) {
+            if (i % 3 == 0) {
+                db.remove(i);
+            }
+        }
+
+        db.close(); // closing db
+
+        // now the deleted keys should maintain their state
+
+        db = buildDB(path, valueSize);
+
+        assertEquals(totalEntries - totalEntries / 3, db.size());
+
+        int[] total = {0};
+        // checking by iterating
+        db.iterate((key, data, offset) -> {
+            ByteBuffer dataValue = ByteBuffer.wrap(data, offset, valueSize);
+            assertEquals(key,   dataValue.getInt());
+            total[0]++;
+        });
+
+        assertEquals(totalEntries - totalEntries / 3, total[0]);
+
+        // checking with random get also
+        for (int i = 1; i <= totalEntries; i++) {
+            if (i % 3 == 0) {
+                assertNull(db.randomGet(i));
+            } else {
+                ByteBuffer dataValue = ByteBuffer.wrap(db.randomGet(i), 0, valueSize);
+                assertEquals(i,   dataValue.getInt());
+            }
+        }
+    }
+
+    @Test
+    void testKeysDeletionCompact() throws IOException, StormDBException {
+        final int valueSize = 28;
+        final Path path = Files.createTempDirectory("stormdb");
+        StormDB db = buildDB(path, valueSize);
+
+        db.remove(1); // key = 1 doesn't exist
+
+        db.put(1, getByteArrayForValueWithValueSize(1, valueSize));
         assertEquals(1, db.size());
-        assertArrayEquals(value.array(), db.randomGet(1));
+        assertArrayEquals(getByteArrayForValueWithValueSize(1, valueSize), db.randomGet(1));
 
         db.remove(1);
         assertEquals(0, db.size());
@@ -846,13 +871,23 @@ class StormDBTest {
         assertEquals(0, total[0]);
 
         total[0] = 0;
-        db.put(1, value.array());
+        db.put(1, getByteArrayForValueWithValueSize(1, valueSize));
         db.iterate((key, data, offset)->{
             ByteBuffer dataValue = ByteBuffer.wrap(data, offset, valueSize);
             assertEquals(key,   dataValue.getInt());
             total[0]++;
         });
         assertEquals(1, total[0]);
+
+        total[0] = 0;
+        db.remove(1);
+        db.iterate((key, data, offset)->{
+            ByteBuffer dataValue = ByteBuffer.wrap(data, offset, valueSize);
+            assertEquals(key,   dataValue.getInt());
+            total[0]++;
+        });
+        assertEquals(0, total[0]);
+        assertEquals(0, db.size());
     }
 
     @Test

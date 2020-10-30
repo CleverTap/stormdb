@@ -569,6 +569,11 @@ public class StormDB {
             throw new ReservedKeyException(key);
         }
 
+        final int recordIndexForKey = index.get(key);
+        if (recordIndexForKey == RESERVED_KEY_MARKER) {
+            return; // no deletion
+        }
+
         rwLock.writeLock().lock();
         try {
 
