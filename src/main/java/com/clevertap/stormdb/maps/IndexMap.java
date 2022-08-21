@@ -26,4 +26,11 @@ public interface IndexMap {
      * @return Size of the index.
      */
     int size();
+
+    /**
+     * API to remove a particular key from the database return {@link StormDB#RESERVED_KEY_MARKER}
+     * @param key The key which needs to be removed
+     * @return the return value stored for that key
+     */
+    int remove(int key);
 }

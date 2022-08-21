@@ -31,4 +31,7 @@ public class DefaultIndexMap implements IndexMap {
     public int size() {
         return indexMap.size();
     }
+
+    @Override
+    public int remove(int key) { return indexMap.remove(key); }
 }
