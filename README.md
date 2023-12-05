@@ -43,26 +43,16 @@ in the database. When we benchmarked sequential reads of popular key value store
       and provide high throughput random reads without caching the entire data file
 
 ## Getting Started
-1. Add the CleverTap Maven Bintray repository
+1. Add the Maven dependency
 ```xml
-<repositories>
-    <repository>
-        <id>bintray-clevertap-Maven</id>
-        <name>bintray</name>
-        <url>https://dl.bintray.com/clevertap/Maven</url>
-    </repository>
-</repositories>
-```
-2. Add the Maven dependency
-```xml
-<!-- Heads up! Use the latest version from https://github.com/CleverTap/stormdb/releases/latest -->
+<!-- Heads up! Use the latest version from https://mvnrepository.com/artifact/com.clevertap/stormdb -->
 <dependency>
     <groupId>com.clevertap</groupId>
     <artifactId>stormdb</artifactId>
-    <version>1.0.0</version>
+    <version>1.2.0</version>
 </dependency>
 ```
-3. Create and use a StormDB instance
+2. Create and use a StormDB instance
 ```java
 // Create.
 final StormDB db = new StormDBBuilder()
