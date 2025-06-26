@@ -70,21 +70,17 @@ public class Buffer {
             throw new ReadOnlyBufferException("Initialised in read only mode!");
         }
 
+        // If buffer is empty, nothing to flush
         if (byteBuffer.position() == 0) {
             return 0;
         }
 
-        // Fill the block with the last record, if required.
-        while ((RecordUtil.addressToIndex(recordSize, byteBuffer.position()))
-                % RECORDS_PER_BLOCK != 0) {
-            final long key = byteBuffer.getLong(byteBuffer.position() - recordSize);
-            add(key, byteBuffer.array(), byteBuffer.position() - recordSize + KEY_SIZE);
-        }
-
-        final int bytes = byteBuffer.position();
-        out.write(byteBuffer.array(), 0, bytes);
+        // Write all buffer contents directly to output stream
+        final int bytesToWrite = byteBuffer.position();
+        out.write(byteBuffer.array(), 0, bytesToWrite);
         out.flush();
-        return bytes;
+
+        return bytesToWrite;
     }
 
     void readFromFiles(List<RandomAccessFile> files,
