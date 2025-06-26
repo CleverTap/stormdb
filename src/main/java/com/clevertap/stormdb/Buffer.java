@@ -5,6 +5,7 @@ import static com.clevertap.stormdb.Config.CRC_SIZE;
 import static com.clevertap.stormdb.Config.KEY_SIZE;
 import static com.clevertap.stormdb.Config.RECORDS_PER_BLOCK;
 
+import com.clevertap.stormdb.exceptions.BufferFullException;
 import com.clevertap.stormdb.exceptions.ReadOnlyBufferException;
 import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
 import com.clevertap.stormdb.exceptions.ValueSizeTooLargeException;
@@ -18,6 +19,7 @@ import java.util.Enumeration;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.zip.CRC32;
+import java.util.ArrayList;
 
 /**
  * The {@link Buffer} is a logical extension of the WAL file. For a random get, if the index points
@@ -27,11 +29,9 @@ import java.util.zip.CRC32;
 public class Buffer {
 
     private ByteBuffer byteBuffer;
-    private final int valueSize;
-    private final int recordSize;
     private final boolean readOnly;
     private final Config dbConfig;
-    private final int maxRecords;
+
 
     /**
      * Initialises a write buffer for the WAL file with the following specification:
@@ -48,39 +48,17 @@ public class Buffer {
      * @param readOnly Whether buffer is read only.
      */
     Buffer(final Config dbConfig, final boolean readOnly) {
-        this.valueSize = dbConfig.getValueSize();
-        this.recordSize = valueSize + KEY_SIZE;
         this.readOnly = readOnly;
         this.dbConfig = dbConfig;
-        if (valueSize > Config.MAX_VALUE_SIZE) {
-            throw new ValueSizeTooLargeException();
-        }
 
-        this.maxRecords = calculateMaxRecords();
-
-        final int blocks = this.maxRecords / RECORDS_PER_BLOCK;
-
-        // Each block will have 1 CRC and 1 sync marker (the sync marker is one kv pair)
-        final int writeBufferSize = blocks * RECORDS_PER_BLOCK * recordSize
-                + (blocks * (CRC_SIZE + recordSize));
-
+        // For variable-length, just use max buffer size directly
+        final int writeBufferSize = dbConfig.getMaxBufferSize();
         byteBuffer = ByteBuffer.allocate(writeBufferSize);
     }
 
+
     int capacity() {
         return byteBuffer.capacity();
-    }
-
-    int calculateMaxRecords() {
-        int recordsToBuffer = Math.max(dbConfig.getMaxBufferSize() / recordSize, RECORDS_PER_BLOCK);
-
-        // Get to the nearest multiple of 128.
-        recordsToBuffer = (recordsToBuffer / RECORDS_PER_BLOCK) * RECORDS_PER_BLOCK;
-        return recordsToBuffer;
-    }
-
-    public int getMaxRecords() {
-        return maxRecords;
     }
 
     int getWriteBufferSize() {
@@ -99,7 +77,7 @@ public class Buffer {
         // Fill the block with the last record, if required.
         while ((RecordUtil.addressToIndex(recordSize, byteBuffer.position()))
                 % RECORDS_PER_BLOCK != 0) {
-            final int key = byteBuffer.getInt(byteBuffer.position() - recordSize);
+            final long key = byteBuffer.getLong(byteBuffer.position() - recordSize);
             add(key, byteBuffer.array(), byteBuffer.position() - recordSize + KEY_SIZE);
         }
 
@@ -179,28 +157,33 @@ public class Buffer {
         return byteBuffer.remaining() == 0; // Perfect alignment, so this works.
     }
 
-    int add(int key, byte[] value, int valueOffset) {
+    int add(long key, byte[] value, int valueOffset, int valueLength) {
         if (readOnly) {
             throw new ReadOnlyBufferException("Initialised in read only mode!");
         }
 
-        if (byteBuffer.position() % RecordUtil.blockSizeWithTrailer(recordSize) == 0) {
-            insertSyncMarker();
+        Config.validateValueLength(valueLength);
+
+        // Check if we have space for this record
+        int recordSize = Config.calculateRecordSize(valueLength);
+        if (byteBuffer.remaining() < recordSize) {
+            throw new BufferFullException(recordSize, byteBuffer.remaining());
         }
 
         final int address = byteBuffer.position();
 
-        byteBuffer.putInt(key);
-        byteBuffer.put(value, valueOffset, valueSize);
+        // Write variable-length record: [Key:8][Length:4][Value:variable][Length:4]
+        byteBuffer.putLong(key);                                    // Key (8 bytes)
+        byteBuffer.putInt(valueLength);                             // Length header (4 bytes)
+        byteBuffer.put(value, valueOffset, valueLength);           // Value (variable bytes)
+        byteBuffer.putInt(valueLength);                             // Length footer (4 bytes)
 
-        // Should we close this block?
-        // Don't close the block if the we're adding the sync marker kv pair.
-        final int nextRecordIndex = RecordUtil.addressToIndex(recordSize, byteBuffer.position());
-        if (nextRecordIndex % RECORDS_PER_BLOCK == 0) {
-            closeBlock();
-        }
         return address;
     }
+    int add(long key, byte[] value, int valueOffset) {
+        return add(key, value, valueOffset, value.length - valueOffset);
+    }
+
 
     /**
      * Attempts to update a key in the in-memory buffer after verifying the key.
@@ -211,8 +194,8 @@ public class Buffer {
      * @param addressInBuffer The address in the buffer at which the key value pair exists
      * @return true if the update succeeds after key verification, false otherwise
      */
-    boolean update(int key, byte[] newValue, int valueOffset, int addressInBuffer) {
-        int savedKey = byteBuffer.getInt(addressInBuffer);
+    boolean update(long key, byte[] newValue, int valueOffset, int addressInBuffer) {
+        long savedKey = byteBuffer.getLong(addressInBuffer);
         if (savedKey != key) {
             return false;
         }
@@ -258,24 +241,6 @@ public class Buffer {
                 return ourBuffer;
             }
         };
-    }
-
-    private void closeBlock() {
-        final CRC32 crc32 = new CRC32();
-        final int blockSize = recordSize * RECORDS_PER_BLOCK;
-        crc32.update(byteBuffer.array(), byteBuffer.position() - blockSize, blockSize);
-        byteBuffer.putInt((int) crc32.getValue());
-    }
-
-    static byte[] getSyncMarker(final int valueSize) {
-        final ByteBuffer syncMarker = ByteBuffer.allocate(valueSize + KEY_SIZE);
-        Arrays.fill(syncMarker.array(), (byte) 0xFF);
-        syncMarker.putInt(RESERVED_KEY_MARKER);  // This will override the first four bytes.
-        return syncMarker.array();
-    }
-
-    protected void insertSyncMarker() {
-        byteBuffer.put(getSyncMarker(valueSize));
     }
 
     void clear() {

@@ -17,7 +17,7 @@ class CustomIndexMapTest {
     void testCustomMap() throws IOException, StormDBException {
         final Path path = Files.createTempDirectory("stormdb");
         final int valueSize = 8;
-        final HashMap<Integer, Integer> kvCache = new HashMap<>();
+        final HashMap<Long, Long> kvCache = new HashMap<>();
         final int[] activityCount = {0,0};
         final StormDB db = new StormDBBuilder()
                 .withDbDir(path.toString())
@@ -25,13 +25,13 @@ class CustomIndexMapTest {
                 .withAutoCompactDisabled()
                 .withIndexMap(new IndexMap() {
                     @Override
-                    public void put(int key, int indexValue) {
+                    public void put(long key, long addressValue) {
                         activityCount[0]++;
-                        kvCache.put(key, indexValue);
+                        kvCache.put(key, addressValue);
                     }
 
                     @Override
-                    public int get(int key) {
+                    public long get(long key) {
                         activityCount[1]++;
                         if (!kvCache.containsKey(key)) {
                             return StormDB.RESERVED_KEY_MARKER;

@@ -7,5 +7,5 @@ import java.io.IOException;
  */
 public interface EntryConsumer {
 
-    void accept(final int key, final byte[] data, final int offset) throws IOException;
+    void accept(final long key, final byte[] data, final int offset) throws IOException;
 }

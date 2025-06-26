@@ -2,9 +2,11 @@ package com.clevertap.stormdb.maps;
 
 import com.clevertap.stormdb.StormDB;
 import gnu.trove.map.hash.TIntIntHashMap;
+import gnu.trove.map.hash.TLongIntHashMap;
+import gnu.trove.map.hash.TLongLongHashMap;
 
 public class DefaultIndexMap implements IndexMap {
-    private final TIntIntHashMap indexMap;
+    private final TLongLongHashMap indexMap;
     private static final int DEFAULT_INITIAL_CAPACITY = 100_000;
     private static final float DEFAULT_LOAD_FACTOR = 0.95f;
 
@@ -13,17 +15,17 @@ public class DefaultIndexMap implements IndexMap {
     }
 
     public DefaultIndexMap(int initialCapacity, float loadFactor) {
-        indexMap = new TIntIntHashMap(initialCapacity, loadFactor, StormDB.RESERVED_KEY_MARKER,
+        indexMap = new TLongLongHashMap(initialCapacity, loadFactor, StormDB.RESERVED_KEY_MARKER,
                 StormDB.RESERVED_KEY_MARKER);
     }
 
     @Override
-    public void put(int key, int indexValue) {
-        indexMap.put(key, indexValue);
+    public void put(long key, long addressValue) {
+        indexMap.put(key, addressValue);
     }
 
     @Override
-    public int get(int key) {
+    public long get(long key) {
         return indexMap.get(key);
     }
 

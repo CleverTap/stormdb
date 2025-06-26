@@ -101,7 +101,7 @@ class BufferTest {
         dbConfig.valueSize = valueSize; // Create new dbConfig for parallel tests.
         final Buffer buffer = new Buffer(dbConfig, false) {
             @Override
-            public int add(int key, byte[] value, int valueOffset) {
+            public int add(long key, byte[] value, int valueOffset) {
                 recordsAdded.incrementAndGet();
                 final byte[] actualValue = new byte[valueSize];
                 System.arraycopy(value, valueOffset, actualValue, 0, valueSize);
@@ -144,7 +144,7 @@ class BufferTest {
             crc32.update(i >> 16);
             crc32.update(i >> 8);
             crc32.update(i);
-            crc32.update(value);
+            crc32.update(value);  // REVIEW
             buffer.add(i, value, 0);
         }
 
