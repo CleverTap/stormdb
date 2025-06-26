@@ -5,7 +5,7 @@ package com.clevertap.stormdb.exceptions;
  */
 public class ReservedKeyException extends RuntimeException {
 
-    public ReservedKeyException(final int key) {
-        super("The key 0x" + Integer.toHexString(key) + " is reserved for internal structures.");
+    public ReservedKeyException(final long key) {
+        super("The key 0x" + Long.toHexString(key) + " is reserved for internal structures.");
     }
 }

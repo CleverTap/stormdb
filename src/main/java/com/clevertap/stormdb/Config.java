@@ -10,7 +10,16 @@ public class Config {
     public static final int CRC_SIZE = 4; // CRC32. Not configurable for now.
 
     // Key size
-    static final int KEY_SIZE = 4; // Not Configurable for now.
+    static final int KEY_SIZE = 8; // Not Configurable for now.
+
+    // Value meta data size
+    public static final int VALUE_LENGTH_SIZE = 4;
+
+    public static final int RECORD_HEADER_SIZE = KEY_SIZE + VALUE_LENGTH_SIZE; // 12 bytes
+    public static final int RECORD_FOOTER_SIZE = VALUE_LENGTH_SIZE; // 4 bytes
+
+    public static final int MAX_VALUE_SIZE = 8192;  // (was 512*1024 as MAX_VALUE_SIZE)
+    public static final int MIN_VALUE_SIZE = 1;      // 1 byte minimum
 
     // Compaction parameter defaults
     private static final long DEFAULT_COMPACTION_WAIT_TIMEOUT_MS =
@@ -32,7 +41,7 @@ public class Config {
      * <p>
      * Note: The hard limit is due to the fact that {@link ByteBuffer} accepts an int as its size.
      */
-    static final int MAX_VALUE_SIZE = 512 * 1024; // Not configurable for now.
+//    static final int MAX_VALUE_SIZE = 512 * 1024; // Not configurable for now.
 
     // File open fd parameter defaults and range
     private static final int DEFAULT_OPEN_FD_COUNT = 10;
@@ -41,7 +50,6 @@ public class Config {
 
     // Must have parameters
     boolean autoCompact = true;
-    int valueSize;
     String dbDir;
 
     // Other parameters
@@ -55,10 +63,6 @@ public class Config {
 
     public boolean autoCompactEnabled() {
         return autoCompact;
-    }
-
-    public int getValueSize() {
-        return valueSize;
     }
 
     public String getDbDir() {
@@ -98,5 +102,32 @@ public class Config {
     }
 
     public IndexMap getIndexMap() { return indexMap; }
+
+    public static int calculateRecordSize(int valueLength) {
+        validateValueLength(valueLength);
+        return RECORD_HEADER_SIZE + valueLength + RECORD_FOOTER_SIZE;
+    }
+
+    public int getValueSize() {
+        throw new UnsupportedOperationException(
+                "getValueSize() not supported in variable-length mode. Use getMaxValueSize() or calculate per value.");
+    }
+
+    public static int getMaxNodeSize() {
+        return calculateRecordSize(MAX_VALUE_SIZE);
+    }
+
+    public static int getMinNodeSize() {
+        return calculateRecordSize(MIN_VALUE_SIZE);
+    }
+
+    public static void validateValueLength(int valueLength) {
+        if (valueLength < MIN_VALUE_SIZE || valueLength > MAX_VALUE_SIZE) {
+            throw new IllegalArgumentException(
+                    "Value length " + valueLength + " outside valid range [" +
+                            MIN_VALUE_SIZE + ", " + MAX_VALUE_SIZE + "]");
+        }
+    }
+
 
 }
