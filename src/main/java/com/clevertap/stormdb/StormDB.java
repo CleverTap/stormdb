@@ -1,13 +1,10 @@
 package com.clevertap.stormdb;
 
-import com.clevertap.stormdb.exceptions.InconsistentDataException;
-import com.clevertap.stormdb.exceptions.IncorrectConfigException;
-import com.clevertap.stormdb.exceptions.ReservedKeyException;
-import com.clevertap.stormdb.exceptions.StormDBException;
-import com.clevertap.stormdb.exceptions.StormDBRuntimeException;
+import com.clevertap.stormdb.exceptions.*;
 import com.clevertap.stormdb.maps.DefaultIndexMap;
 import com.clevertap.stormdb.maps.IndexMap;
 import com.clevertap.stormdb.internal.RandomAccessFilePool;
+import com.clevertap.stormdb.utils.BitSetLong;
 import com.clevertap.stormdb.utils.ByteUtil;
 import com.clevertap.stormdb.utils.RecordUtil;
 import java.io.BufferedOutputStream;
@@ -22,10 +19,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.BitSet;
-import java.util.Enumeration;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -45,7 +39,7 @@ import org.slf4j.LoggerFactory;
  */
 public class StormDB {
 
-    public static final int RESERVED_KEY_MARKER = 0xffffffff;
+    public static final long RESERVED_KEY_MARKER = 0xffffffffffffffffL;
 
     private static final String FILE_NAME_DATA = "data";
     private static final String FILE_NAME_WAL = "wal";
@@ -58,7 +52,7 @@ public class StormDB {
      */
     private final IndexMap index;
 
-    private BitSet dataInWalFile = new BitSet();
+    private BitSetLong dataInWalFile = new BitSetLong();
 
     private final ReentrantReadWriteLock rwLock = new ReentrantReadWriteLock();
 
@@ -66,8 +60,6 @@ public class StormDB {
 
     private final Buffer buffer;
     private long lastBufferFlushTimeMs;
-
-    private final int recordSize;
 
     private long bytesInWalFile = -1; // Will be initialised on the first write.
     private final File dbDirFile;
@@ -106,8 +98,6 @@ public class StormDB {
         } else {
             index = conf.getIndexMap();
         }
-
-        recordSize = conf.getValueSize() + Config.KEY_SIZE;
 
         buffer = new Buffer(conf, false);
         lastBufferFlushTimeMs = System.currentTimeMillis();
@@ -293,7 +283,7 @@ public class StormDB {
             // A small price to pay for not needing bitsets.
             try {
                 reader.readFromFile(wrapper, false, entry -> {
-                    final int key = entry.getInt();
+                    final long key = entry.getLong();
                     index.put(key, fileIndex[0]++);
                     if (isWal) {
                         dataInWalFile.set(key);
@@ -457,16 +447,17 @@ public class StormDB {
 
         try {
             rwLock.writeLock().lock();
+
             final Enumeration<ByteBuffer> iterator = buffer.iterator(false);
 
             while (iterator.hasMoreElements()) {
                 final ByteBuffer byteBuffer = iterator.nextElement();
-                final long address = RecordUtil
-                        .indexToAddress(recordSize, compactionState.nextFileRecordIndex);
+                final long address = compactionState.nextFileRecordIndex;
                 compactionState.nextFileRecordIndex++;
-                final int key = byteBuffer.getInt();
+                final long key = byteBuffer.getLong();
+
                 if (!compactionState.dataInNextWalFile.get(key)) {
-                    index.put(key, RecordUtil.addressToIndex(recordSize, address));
+                    index.put(key, address);
                     compactionState.dataInNextFile.set(key);
                 }
             }
@@ -476,21 +467,21 @@ public class StormDB {
 
         buffer.clear();
     }
-
     public void put(final byte[] key, final byte[] value, final int valueOffset)
             throws IOException {
-        put(ByteUtil.toInt(key, 0), value, valueOffset);
+        put(ByteUtil.toLong(key, 0), value, valueOffset);
     }
 
     public void put(final byte[] key, final byte[] value) throws IOException {
         put(key, value, 0);
     }
 
-    public void put(int key, byte[] value) throws IOException {
+    public void put(long key, byte[] value) throws IOException {
         put(key, value, 0);
     }
+    LinkedList<String> newk= new LinkedList<>();
 
-    public void put(int key, byte[] value, int valueOffset) throws IOException {
+    public void put(long key, byte[] value, int valueOffset) throws IOException {
         if (exceptionDuringBackgroundOps != null) {
             throw new StormDBRuntimeException("Will not accept any further writes since the "
                     + "last compaction resulted in an exception!", exceptionDuringBackgroundOps);
@@ -504,7 +495,7 @@ public class StormDB {
         try {
             boolean updatedInPlace = false;
 
-            final int recordIndexForKey = index.get(key);
+            final long recordIndexForKey = index.get(key);
 
             // Check if the key exists in the WAL file.
             if ((recordIndexForKey != RESERVED_KEY_MARKER) && ((isCompactionInProgress() && compactionState.dataInNextWalFile.get(key)) || (!isCompactionInProgress() && dataInWalFile.get(key)))) {
@@ -535,6 +526,73 @@ public class StormDB {
                 index.put(key, recordIndex);
             }
 
+            if (isCompactionInProgress()) {
+                compactionState.dataInNextWalFile.set(key);
+            } else {
+                dataInWalFile.set(key);
+            }
+
+        } finally {
+            rwLock.writeLock().unlock();
+        }
+    }
+
+    public void put(long key, byte[] value, int valueOffset) throws IOException {
+        if (exceptionDuringBackgroundOps != null) {
+            throw new StormDBRuntimeException("Will not accept any further writes since the "
+                    + "last compaction resulted in an exception!", exceptionDuringBackgroundOps);
+        }
+        if (key == RESERVED_KEY_MARKER) {
+            throw new ReservedKeyException(RESERVED_KEY_MARKER);
+        }
+
+        rwLock.writeLock().lock();
+        try {
+            boolean updatedInPlace = false;
+
+            //  Index now stores  FILE ADDRESSES (byte positions)
+            final long address = index.get(key);
+
+            // Check if the key exists in the WAL file for in-place update
+            if ((address != RESERVED_KEY_MARKER) &&
+                    ((isCompactionInProgress() && compactionState.dataInNextWalFile.get(key)) ||
+                            (!isCompactionInProgress() && dataInWalFile.get(key)))) {
+
+                // Direct address comparison
+                if (address >= bytesInWalFile) {
+                    int addressInBuffer = (int)(address - bytesInWalFile);
+                    // NEW: update() method now handles variable-length values
+                    updatedInPlace = buffer.update(key, value, valueOffset, addressInBuffer);
+                }
+            }
+
+            // If we couldn't update in place, add new record
+            if (!updatedInPlace) {
+                try {
+                    // NEW: Try to add to buffer (may throw BufferFullException)
+                    final int addressInBuffer = buffer.add(key, value, valueOffset);
+
+                    // NEW: Store direct file address (no RecordUtil conversion)
+                    final long absoluteAddress = bytesInWalFile + addressInBuffer;
+                    index.put(key, absoluteAddress);
+
+                } catch (BufferFullException e) {
+                    // NEW: Handle buffer full gracefully with exception handling
+                    flush();
+
+                    // Notify compaction thread
+                    synchronized (compactionSync) {
+                        compactionSync.notifyAll();
+                    }
+
+                    // NEW: Retry adding after flush
+                    final int addressInBuffer = buffer.add(key, value, valueOffset);
+                    final long absoluteAddress = bytesInWalFile + addressInBuffer;
+                    index.put(key, absoluteAddress);
+                }
+            }
+
+            // Mark key as present in WAL (UNCHANGED)
             if (isCompactionInProgress()) {
                 compactionState.dataInNextWalFile.set(key);
             } else {
@@ -658,22 +716,22 @@ public class StormDB {
         }
     }
 
-    public byte[] randomGet(final int key) throws IOException, StormDBException {
-        int recordIndex;
+    public byte[] randomGet(final long key) throws IOException, StormDBException {
+        long recordAddress;
         final RandomAccessFileWrapper f;
         byte[] value;
         rwLock.readLock().lock();
         final long address;
         try {
-            recordIndex = index.get(key);
-            if (recordIndex == RESERVED_KEY_MARKER) { // No mapping value.
+            recordAddress = index.get(key);
+            if (recordAddress == RESERVED_KEY_MARKER) { // No mapping value.
                 return null; // NOSONAR - returning null is a part of the interface.
             }
 
             value = new byte[conf.getValueSize()];
 
             if (isCompactionInProgress() && compactionState.dataInNextWalFile.get(key)) {
-                address = RecordUtil.indexToAddress(recordSize, recordIndex);
+                address = RecordUtil.indexToAddress(recordSize, recordAddress);
                 if (address >= bytesInWalFile) {
                     System.arraycopy(buffer.array(),
                             (int) (address - bytesInWalFile + Config.KEY_SIZE),
@@ -682,10 +740,10 @@ public class StormDB {
                 }
                 f = filePool.borrowObject(compactionState.nextWalFile);
             } else if (isCompactionInProgress() && compactionState.dataInNextFile.get(key)) {
-                address = RecordUtil.indexToAddress(recordSize, recordIndex);
+                address = RecordUtil.indexToAddress(recordSize, recordAddress);
                 f = filePool.borrowObject(compactionState.nextDataFile);
             } else if (dataInWalFile.get(key)) {
-                address = RecordUtil.indexToAddress(recordSize, recordIndex);
+                address = RecordUtil.indexToAddress(recordSize, recordAddress);
                 // If compaction is in progress, we can not read in-memory.
                 if (!isCompactionInProgress() && address >= bytesInWalFile) {
                     System.arraycopy(buffer.array(),
@@ -695,7 +753,7 @@ public class StormDB {
                 }
                 f = filePool.borrowObject(walFile);
             } else {
-                address = RecordUtil.indexToAddress(recordSize, recordIndex);
+                address = RecordUtil.indexToAddress(recordSize, recordAddress);
                 f = filePool.borrowObject(dataFile);
             }
         } finally {
