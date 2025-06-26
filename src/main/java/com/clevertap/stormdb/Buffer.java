@@ -89,32 +89,40 @@ public class Buffer {
             readFromFile(file, reverse, recordConsumer);
         }
     }
-
+    /**
+     * Read variable-length records from a file, supporting both forward and backward iteration.
+     * No longer depends on fixed block sizes - works directly with variable-length records.
+     */
     void readFromFile(final RandomAccessFile file, final boolean reverse,
-            final Consumer<ByteBuffer> recordConsumer)
-            throws IOException {
-        final int blockSize = RecordUtil.blockSizeWithTrailer(recordSize);
+                      final Consumer<ByteBuffer> recordConsumer) throws IOException {
 
         if (reverse) {
-            if (file.getFilePointer() % blockSize != 0) {
-                throw new StormDBRuntimeException("Inconsistent data for iteration!");
-            }
-
+            // This is needed for compaction: newer records (at end) should overwrite older ones
             while (file.getFilePointer() != 0) {
                 byteBuffer.clear();
-                final long validBytesRemaining = file.getFilePointer() - byteBuffer.capacity();
-                file.seek(Math.max(validBytesRemaining, 0));
 
+                final long currentPosition = file.getFilePointer();
+                final long bytesToRead = Math.min(currentPosition, byteBuffer.capacity());
+                final long seekPosition = currentPosition - bytesToRead;
+
+                // Seek to the start position for this chunk
+                file.seek(seekPosition);
+
+                // Read the chunk and process variable-length records
                 fillBuffer(file, recordConsumer, true);
 
-                // Set the position again, since the read op moved the cursor ahead.
-                file.seek(Math.max(validBytesRemaining, 0));
+                // Move file pointer back for next iteration
+                file.seek(seekPosition);
             }
         } else {
+            // Read file forwards until end
+            // This is used for normal iteration and recovery
             while (true) {
                 byteBuffer.clear();
                 final int bytesRead = fillBuffer(file, recordConsumer, false);
-                if (bytesRead < blockSize) {
+
+                // Stop when we reach end of file (no more data to read)
+                if (bytesRead == 0) {
                     break;
                 }
             }
